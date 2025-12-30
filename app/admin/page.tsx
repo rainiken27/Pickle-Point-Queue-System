@@ -235,6 +235,106 @@ const storage = {
     notificationSystem.show('Data exported successfully', 'success');
   },
 
+  exportToCSV: (allTime = false): void => {
+    const today = new Date().toDateString();
+    const logsToExport = allTime ? logData : logData.filter(log => 
+      new Date(log.completedAt || '').toDateString() === today
+    );
+
+    const dateRange = allTime ? 'All Time' : 'Today';
+    
+    // Create CSV headers
+    const headers = [
+      'Group Name',
+      'Players',
+      'Court',
+      'Start Time',
+      'End Time',
+      'Duration (min)',
+      'Date',
+      'Day of Week'
+    ];
+
+    // Create CSV rows
+    const rows = logsToExport.map(log => {
+      const completedDate = log.completedAt ? new Date(log.completedAt) : null;
+      return [
+        log.name,
+        log.players.toString(),
+        log.courtId ? `Court ${log.courtId}` : 'N/A',
+        log.calledAt ? new Date(log.calledAt).toLocaleTimeString() : 'N/A',
+        log.completedAt ? new Date(log.completedAt).toLocaleTimeString() : 'N/A',
+        log.duration.toString(),
+        completedDate ? completedDate.toLocaleDateString() : 'N/A',
+        completedDate ? completedDate.toLocaleDateString('en-US', { weekday: 'long' }) : 'N/A'
+      ];
+    });
+
+    // Add summary section
+    const totalSessions = logsToExport.length;
+    const totalPlayers = logsToExport.reduce((sum, log) => sum + log.players, 0);
+    const avgDuration = totalSessions > 0 
+      ? Math.round(logsToExport.reduce((sum, log) => sum + log.duration, 0) / totalSessions)
+      : 0;
+    
+    rows.push([]);
+    rows.push([`=== ${dateRange.toUpperCase()} SUMMARY ===`, '', '', '', '', '', '', '']);
+    rows.push(['Total Sessions', totalSessions.toString(), '', '', '', '', '', '']);
+    rows.push(['Total Players', totalPlayers.toString(), '', '', '', '', '', '']);
+    rows.push(['Average Duration (min)', avgDuration.toString(), '', '', '', '', '', '']);
+    if (!allTime) {
+      rows.push(['Currently Waiting', storage.getStats().currentWaiting.toString(), '', '', '', '', '', '']);
+    }
+    
+    // Add court utilization
+    rows.push([]);
+    rows.push(['=== COURT UTILIZATION ===', '', '', '', '', '', '', '']);
+    const courtStats = [1, 2, 3, 4].map(courtId => {
+      const courtSessions = logsToExport.filter(log => log.courtId === courtId);
+      return {
+        court: courtId,
+        sessions: courtSessions.length,
+        totalTime: courtSessions.reduce((sum, log) => sum + log.duration, 0)
+      };
+    });
+    
+    courtStats.forEach(court => {
+      rows.push([
+        `Court ${court.court}`,
+        `${court.sessions} sessions`,
+        `${court.totalTime} min total`,
+        court.sessions > 0 ? `${Math.round(court.totalTime / court.sessions)} min avg` : '0 min avg',
+        '', '', '', ''
+      ]);
+    });
+
+    // Convert to CSV format with proper escaping
+    const csvContent = [headers, ...rows]
+      .map(row => row.map(field => {
+        // Escape quotes and wrap in quotes if contains comma, quote, or newline
+        const escaped = field.toString().replace(/"/g, '""');
+        return /[",\n\r]/.test(escaped) ? `"${escaped}"` : escaped;
+      }).join(','))
+      .join('\n');
+
+    // Add BOM for proper Excel UTF-8 support
+    const BOM = '\uFEFF';
+    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const filename = allTime 
+      ? `pickleball-sessions-all-time-${new Date().toISOString().split('T')[0]}.csv`
+      : `pickleball-sessions-${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    notificationSystem.show(`${dateRange} Excel file exported successfully! Open with Excel or Google Sheets`, 'success');
+  },
+
   getStats: () => {
     const today = new Date().toDateString();
     const todayLogs = logData.filter(log => 
@@ -420,12 +520,31 @@ export default function AdminPage(): React.JSX.Element {
             >
               Reset All Data
             </button>
-            <button
-              onClick={() => storage.exportData()}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
-            >
-              Export Data
-            </button>
+            <div className="relative group">
+              <button className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm">
+                Export Data ▼
+              </button>
+              <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-10 min-w-52">
+                <button
+                  onClick={() => storage.exportToCSV(false)}
+                  className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-t-lg"
+                >
+                  📊 Export Today to Excel (CSV)
+                </button>
+                <button
+                  onClick={() => storage.exportToCSV(true)}
+                  className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                >
+                  📈 Export All Data to Excel (CSV)
+                </button>
+                <button
+                  onClick={() => storage.exportData()}
+                  className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-b-lg"
+                >
+                  📄 Export Raw Data (JSON)
+                </button>
+              </div>
+            </div>
             <a
               href="/display"
               target="_blank"
