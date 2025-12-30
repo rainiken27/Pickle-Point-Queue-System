@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Pickleball Queue System
 
 A professional queue management system for pickleball courts built with Next.js, React, and TypeScript.
@@ -157,3 +158,6 @@ Potential improvements for future versions:
 ## License
 
 Private project
+=======
+# Pickle-Point-Queue-System
+>>>>>>> a55ef5f3ef276b8b7a8681df16c4a235fbaeb7d3
