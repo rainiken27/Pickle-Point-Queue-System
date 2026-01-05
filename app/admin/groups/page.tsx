@@ -328,31 +328,33 @@ export default function GroupsManagementPage() {
                 <div className="space-y-3">
                   {availablePlayers.length > 0 ? (
                     availablePlayers.map(player => (
-                      <Card key={player.id} className="hover:border-green-300 transition-colors cursor-pointer">
-                        <CardBody className="p-4" onClick={() => handleAddMember(selectedGroup.id, player.id)}>
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
-                                <span className="text-lg font-bold text-green-600">
-                                  {player.name.charAt(0).toUpperCase()}
-                                </span>
+                      <div key={player.id} onClick={() => handleAddMember(selectedGroup.id, player.id)} className="cursor-pointer">
+                        <Card className="hover:border-green-300 transition-colors">
+                          <CardBody className="p-4">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
+                                  <span className="text-lg font-bold text-green-600">
+                                    {player.name.charAt(0).toUpperCase()}
+                                  </span>
+                                </div>
+                                <div>
+                                  <p className="font-semibold text-gray-900">{player.name}</p>
+                                  <p className="text-sm text-gray-600">
+                                    {player.skill_level} • {player.gender}
+                                    {(player as any).active_session && (
+                                      <span className="ml-1 text-blue-600">
+                                        • {(player as any).active_session.building.replace('_', ' ').toUpperCase()}
+                                      </span>
+                                    )}
+                                  </p>
+                                </div>
                               </div>
-                              <div>
-                                <p className="font-semibold text-gray-900">{player.name}</p>
-                                <p className="text-sm text-gray-600">
-                                  {player.skill_level} • {player.gender}
-                                  {(player as any).active_session && (
-                                    <span className="ml-1 text-blue-600">
-                                      • {(player as any).active_session.building.replace('_', ' ').toUpperCase()}
-                                    </span>
-                                  )}
-                                </p>
-                              </div>
+                              <UserPlus className="w-5 h-5 text-green-600" />
                             </div>
-                            <UserPlus className="w-5 h-5 text-green-600" />
-                          </div>
-                        </CardBody>
-                      </Card>
+                          </CardBody>
+                        </Card>
+                      </div>
                     ))
                   ) : (
                     <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
@@ -448,53 +450,51 @@ export default function GroupsManagementPage() {
         {filteredGroups.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredGroups.map(group => (
-              <Card
-                key={group.id}
-                className="hover:shadow-lg transition-all cursor-pointer border-blue-200"
-                onClick={() => handleViewGroup(group.id)}
-              >
-                <CardHeader className="bg-gradient-to-r from-blue-50 to-blue-100">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                      <Users className="w-5 h-5 text-blue-600" />
-                      {group.name}
-                    </h3>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setGroupToDelete(group);
-                        setShowDeleteModal(true);
-                      }}
-                      className="p-1.5 hover:bg-red-100 rounded transition-colors"
-                      title="Delete group"
-                    >
-                      <Trash2 className="w-4 h-4 text-red-600" />
-                    </button>
-                  </div>
-                </CardHeader>
-                <CardBody>
-                  <div className="space-y-3">
+              <div key={group.id} onClick={() => handleViewGroup(group.id)} className="cursor-pointer">
+                <Card className="hover:shadow-lg transition-all border-blue-200">
+                  <CardHeader className="bg-gradient-to-r from-blue-50 to-blue-100">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-600">Members</span>
-                      <span className="font-bold text-blue-600">{group.member_count}/4</span>
+                      <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                        <Users className="w-5 h-5 text-blue-600" />
+                        {group.name}
+                      </h3>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setGroupToDelete(group);
+                          setShowDeleteModal(true);
+                        }}
+                        className="p-1.5 hover:bg-red-100 rounded transition-colors"
+                        title="Delete group"
+                      >
+                        <Trash2 className="w-4 h-4 text-red-600" />
+                      </button>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-600">Created</span>
-                      <span className="text-sm font-medium text-gray-900">
-                        {new Date(group.created_at).toLocaleDateString()}
-                      </span>
+                  </CardHeader>
+                  <CardBody>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-gray-600">Members</span>
+                        <span className="font-bold text-blue-600">{group.member_count}/4</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-gray-600">Created</span>
+                        <span className="text-sm font-medium text-gray-900">
+                          {new Date(group.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <div className="pt-2 border-t">
+                        <Button size="sm" className="w-full" onClick={(e) => {
+                          e.stopPropagation();
+                          handleViewGroup(group.id);
+                        }}>
+                          View Details
+                        </Button>
+                      </div>
                     </div>
-                    <div className="pt-2 border-t">
-                      <Button size="sm" className="w-full" onClick={(e) => {
-                        e.stopPropagation();
-                        handleViewGroup(group.id);
-                      }}>
-                        View Details
-                      </Button>
-                    </div>
-                  </div>
-                </CardBody>
-              </Card>
+                  </CardBody>
+                </Card>
+              </div>
             ))}
           </div>
         ) : (

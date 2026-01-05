@@ -1,6 +1,6 @@
 import { BuildingType } from './session';
 
-export type CourtStatus = 'available' | 'occupied';
+export type CourtStatus = 'available' | 'occupied' | 'reserved';
 
 export interface Court {
   id: string;
