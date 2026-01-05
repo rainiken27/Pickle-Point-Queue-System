@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Pickleball Queue System
 
 A professional queue management system for pickleball courts built with Next.js, React, and TypeScript.
@@ -13,7 +12,7 @@ A professional queue management system for pickleball courts built with Next.js,
 - **Session Completion**: Mark sessions as complete and track duration per court
 - **Real-time Stats**: View today's statistics (sessions, players, avg duration)
 - **Session Log**: Complete history with court assignments and durations
-- **Keyboard Shortcuts**: 
+- **Keyboard Shortcuts**:
   - `Ctrl+N` / `Cmd+N`: Add new group
 - **Notifications**: Visual feedback for all actions
 - **Data Export**: Export session data as JSON
@@ -158,6 +157,3 @@ Potential improvements for future versions:
 ## License
 
 Private project
-=======
-# Pickle-Point-Queue-System
->>>>>>> a55ef5f3ef276b8b7a8681df16c4a235fbaeb7d3

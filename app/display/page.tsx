@@ -1,286 +1,240 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import { Users, ChevronRight, Clock } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { useRealtime } from '@/hooks/useRealtime';
+import { useQueue, useCourts, useBuildings } from '@/store';
+import { Wifi, WifiOff, Clock, Users, Ban } from 'lucide-react';
+import { BuildingType, Court, QueueEntryWithPlayer } from '@/types';
+import { getSkillLevelLabel } from '@/lib/utils/skillLevel';
+import Link from 'next/link';
 
-// Types (same as admin page)
-interface QueueGroup {
-  id: number;
-  name: string;
-  players: number;
-  addedAt: string;
-  status: 'waiting' | 'called' | 'completed';
-  calledAt?: string;
-  completedAt?: string;
-  courtId?: number;
+interface BuildingColumnProps {
+  building: BuildingType;
+  buildingName: string;
+  courts: Court[];
+  queueEntries: QueueEntryWithPlayer[];
+  isActive: boolean;
 }
 
-interface LogEntry extends QueueGroup {
-  duration: number;
-}
-
-type ListenerCallback = () => void;
-
-// Storage system (same as admin page)
-let queueData: QueueGroup[] = [];
-let logData: LogEntry[] = [];
-let listeners: ListenerCallback[] = [];
-
-const STORAGE_KEYS = {
-  QUEUE: 'pickleball-queue-data',
-  LOGS: 'pickleball-logs-data'
-};
-
-const COURTS = [
-  { id: 1, name: 'Court 1' },
-  { id: 2, name: 'Court 2' },
-  { id: 3, name: 'Court 3' },
-  { id: 4, name: 'Court 4' }
-];
-
-const storage = {
-  init: (): void => {
-    if (typeof window !== 'undefined') {
-      try {
-        const savedQueue = localStorage.getItem(STORAGE_KEYS.QUEUE);
-        const savedLogs = localStorage.getItem(STORAGE_KEYS.LOGS);
-        
-        if (savedQueue) {
-          const parsedQueue = JSON.parse(savedQueue);
-          // Only update if data has actually changed
-          if (JSON.stringify(queueData) !== JSON.stringify(parsedQueue)) {
-            queueData = parsedQueue;
-            listeners.forEach(l => l());
-          }
-        }
-        if (savedLogs) {
-          const parsedLogs = JSON.parse(savedLogs);
-          if (JSON.stringify(logData) !== JSON.stringify(parsedLogs)) {
-            logData = parsedLogs;
-            listeners.forEach(l => l());
-          }
-        }
-      } catch (error) {
-        console.error('Error loading saved data:', error);
-      }
-    }
-  },
-
-  subscribe: (callback: ListenerCallback): (() => void) => {
-    listeners.push(callback);
-    return () => {
-      listeners = listeners.filter(l => l !== callback);
-    };
-  },
-  
-  getQueue: (): QueueGroup[] => queueData,
-  
-  getLogs: (): LogEntry[] => logData,
-
-  getStats: () => {
-    const today = new Date().toDateString();
-    const todayLogs = logData.filter(log => 
-      new Date(log.completedAt || '').toDateString() === today
-    );
-    
-    return {
-      totalSessions: todayLogs.length,
-      totalPlayers: todayLogs.reduce((sum, log) => sum + log.players, 0),
-      averageDuration: todayLogs.length > 0 
-        ? Math.round(todayLogs.reduce((sum, log) => sum + log.duration, 0) / todayLogs.length)
-        : 0,
-      currentWaiting: queueData.filter(g => g.status === 'waiting').length
-    };
-  },
-
-  getCourtGroups: () => {
-    return COURTS.map(court => ({
-      court,
-      currentGroup: queueData.find(g => g.status === 'called' && g.courtId === court.id),
-      isAvailable: !queueData.find(g => g.status === 'called' && g.courtId === court.id)
-    }));
-  }
-};
-
-export default function DisplayPage(): React.JSX.Element {
-  const [queue, setQueue] = useState<QueueGroup[]>([]);
-  const [currentTime, setCurrentTime] = useState<string>(new Date().toLocaleTimeString());
-  const [isLoaded, setIsLoaded] = useState<boolean>(false);
-
-  const refreshData = () => {
-    storage.init();
-    setQueue([...storage.getQueue()]);
-    setIsLoaded(true);
-  };
-
-  useEffect(() => {
-    // Initial load
-    refreshData();
-    
-    const unsubscribe = storage.subscribe(() => {
-      setQueue([...storage.getQueue()]);
-    });
-    
-    const timeInterval = setInterval(() => {
-      setCurrentTime(new Date().toLocaleTimeString());
-    }, 1000);
-
-    // Listen for localStorage changes from other tabs/windows
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'pickleball-queue-data' || e.key === 'pickleball-logs-data') {
-        refreshData();
-      }
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-
-    // Also set up a polling mechanism to ensure data stays in sync
-    const pollInterval = setInterval(() => {
-      refreshData();
-    }, 3000); // Poll every 3 seconds
-
-    return () => {
-      unsubscribe();
-      clearInterval(timeInterval);
-      clearInterval(pollInterval);
-      window.removeEventListener('storage', handleStorageChange);
-    };
-  }, []);
-
-  const nextGroups = queue.filter(g => g.status === 'waiting').slice(0, 8);
-  const stats = storage.getStats();
-  const courtGroups = storage.getCourtGroups();
-  
-  const getEstimatedWaitTime = (position: number): string => {
-    const avgDuration = stats.averageDuration || 20; // Default 20 min if no data
-    const estimatedMinutes = position * avgDuration;
-    if (estimatedMinutes < 60) {
-      return `~${estimatedMinutes} min`;
-    }
-    const hours = Math.floor(estimatedMinutes / 60);
-    const minutes = estimatedMinutes % 60;
-    return `~${hours}h ${minutes}m`;
-  };
-
-  const getSessionDuration = (calledAt: string): string => {
-    const duration = Math.floor((new Date().getTime() - new Date(calledAt).getTime()) / 60000);
-    return `${duration} min`;
-  };
+function BuildingColumn({ building, buildingName, courts, queueEntries, isActive }: BuildingColumnProps) {
+  const availableCourts = courts.filter(c => c.status === 'available').length;
+  const buildingQueue = queueEntries.filter(e => e.building === building && e.status === 'waiting');
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-700 p-4">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-6 relative">
-          <button
-            onClick={refreshData}
-            className="absolute top-0 right-0 px-3 py-1 bg-white/20 text-white rounded-lg hover:bg-white/30 text-sm"
-          >
-            Refresh
-          </button>
-          <h1 className="text-4xl font-bold text-white mb-2">Pickleball Courts</h1>
-          <div className="flex justify-center items-center gap-8 text-blue-200">
-            <p className="text-lg">{new Date().toLocaleDateString('en-US', { 
-              weekday: 'long', 
-              year: 'numeric', 
-              month: 'long', 
-              day: 'numeric' 
-            })}</p>
-            <p className="text-lg font-mono">{currentTime}</p>
-            <p className="text-base">Sessions Today: {stats.totalSessions}</p>
-            <p className="text-base">Waiting: {stats.currentWaiting}</p>
-            {!isLoaded && <p className="text-yellow-300 text-sm">Loading...</p>}
-          </div>
+    <div className="flex flex-col h-full">
+      {/* Building Header with Link */}
+      <Link
+        href={`/display/${building.replace('_', '-')}`}
+        className={`backdrop-blur-md p-4 rounded-t-lg shadow-lg flex-shrink-0 hover:bg-black/60 transition-colors group ${
+          isActive ? 'bg-black/50' : 'bg-red-900/50'
+        }`}
+      >
+        <h2 className={`text-4xl font-bold text-center tracking-wide group-hover:text-blue-300 transition-colors flex items-center justify-center gap-3 ${
+          isActive ? 'text-white' : 'text-red-200'
+        }`}>
+          {!isActive && <Ban className="w-8 h-8" />}
+          {buildingName}
+          {!isActive && <span className="text-xl">(CLOSED)</span>}
+        </h2>
+        <div className={`flex justify-center gap-2 text-lg mt-2 ${
+          isActive ? 'text-white/80' : 'text-red-200/80'
+        }`}>
+          <span className="font-medium">{availableCourts}/{courts.length} Available</span>
+          <span>•</span>
+          <span className="font-medium">{buildingQueue.length} Waiting</span>
         </div>
+      </Link>
 
-        {/* Courts Grid */}
-        <div className="grid grid-cols-2 gap-4 mb-6">
-          {courtGroups.map(({ court, currentGroup, isAvailable }) => (
-            <div key={court.id} className="bg-white/95 rounded-2xl shadow-xl p-6 min-h-[300px]">
-              <div className="text-center">
-                <h2 className="text-2xl font-bold text-gray-800 mb-4">{court.name}</h2>
-                
-                {currentGroup ? (
-                  <div className="bg-green-50 border-2 border-green-500 rounded-xl p-6">
-                    <div className="mb-4">
-                      <div className="inline-block bg-green-500 text-white px-3 py-1 rounded-full text-sm font-semibold mb-3">
-                        NOW PLAYING
-                      </div>
-                    </div>
-                    <p className="text-3xl font-bold text-green-700 mb-2">{currentGroup.name}</p>
-                    <p className="text-lg text-gray-600 mb-3">{currentGroup.players} Players</p>
-                    {currentGroup.calledAt && (
-                      <div className="text-sm text-gray-500">
-                        <p>Started: {new Date(currentGroup.calledAt).toLocaleTimeString()}</p>
-                        <p className="font-semibold text-green-600">
-                          Playing: {getSessionDuration(currentGroup.calledAt)}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="bg-blue-50 border-2 border-dashed border-blue-300 rounded-xl p-6 flex flex-col items-center justify-center min-h-[200px]">
-                    <Users size={48} className="text-blue-400 mb-4" />
-                    <p className="text-2xl font-bold text-blue-600 mb-2">Available</p>
-                    <p className="text-gray-600">Ready for next group</p>
-                  </div>
-                )}
+      {/* Courts - Single Row */}
+      <div className="bg-black/25 backdrop-blur-md p-2 border-x border-white/10 flex-shrink-0">
+        <div className="flex gap-3 justify-center">
+          {courts.map(court => (
+            <div
+              key={court.id}
+              className={`flex-1 p-2 rounded-lg ${
+                court.status === 'available'
+                  ? 'bg-green-600'
+                  : 'bg-red-600'
+              }`}
+            >
+              <div className="text-2xl font-bold text-white text-center">Court {court.court_number}</div>
+              <div className="text-sm text-white/80 text-center">
+                {court.status === 'available' ? 'Open' : 'In Use'}
               </div>
             </div>
           ))}
         </div>
+      </div>
 
-        {/* Queue Section */}
-        {nextGroups.length > 0 && (
-          <div className="bg-white/95 rounded-2xl shadow-xl p-6">
-            <div className="text-center mb-6">
-              <h2 className="text-3xl font-bold text-gray-800 mb-2">Up Next</h2>
-              <p className="text-lg text-gray-600">{nextGroups.length} groups waiting</p>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {nextGroups.map((group, index) => (
-                <div key={group.id} className="flex items-center gap-4 bg-blue-50 p-4 rounded-xl hover:bg-blue-100 transition-colors">
-                  <span className="text-2xl font-bold text-blue-600 w-12">#{index + 1}</span>
-                  <div className="flex-1">
-                    <p className="text-xl font-bold text-gray-900">{group.name}</p>
-                    <p className="text-sm text-gray-600">{group.players} Players</p>
+      {/* Queue */}
+      <div className="bg-black/25 backdrop-blur-md p-3 rounded-b-lg border-x border-b border-white/10 flex-1 shadow-md flex flex-col min-h-0">
+        <h3 className="text-lg font-semibold text-white/90 mb-3 flex items-center gap-2 tracking-wide flex-shrink-0">
+          <Users className="w-8 h-8" />
+          Queue ({buildingQueue.length})
+        </h3>
+
+        {buildingQueue.length === 0 ? (
+          <div className="text-center py-6 flex-1 flex items-center justify-center">
+            <p className="text-white/50 text-base font-medium">No players waiting</p>
+          </div>
+        ) : (
+          <div className="space-y-2.5 overflow-y-auto flex-1 pr-1">
+            {buildingQueue.map((entry, index) => (
+              <div
+                key={entry.id}
+                className={`p-3 rounded-lg transition-all ${
+                  index === 0
+                    ? 'bg-yellow-500/30 border border-yellow-400/40'
+                    : 'bg-white/5 border border-white/5'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="font-bold text-white text-lg w-8">#{index + 1}</span>
+                  {/* Player Photo */}
+                  <div className="w-12 h-12 rounded-full overflow-hidden bg-white/10 flex-shrink-0 border border-white/20">
+                    {entry.player.photo_url ? (
+                      <img
+                        src={entry.player.photo_url}
+                        alt={entry.player.name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-white text-xl font-bold">
+                        {entry.player.name.charAt(0).toUpperCase()}
+                      </div>
+                    )}
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm font-semibold text-orange-600">
-                      {getEstimatedWaitTime(index + 1)}
-                    </p>
-                    <p className="text-xs text-gray-500">est. wait</p>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-white truncate text-lg">{entry.player.name}</div>
+                    <div className="text-sm text-white/60">
+                      {getSkillLevelLabel(entry.player.skill_level)}
+                    </div>
                   </div>
-                  <ChevronRight size={24} className="text-blue-400" />
+                  {entry.estimated_wait_minutes && (
+                    <div className="text-sm text-white/70 flex-shrink-0">
+                      <Clock className="w-4 h-4 inline mr-1" />
+                      {entry.estimated_wait_minutes}m
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
-            
-            {queue.filter(g => g.status === 'waiting').length > 8 && (
-              <div className="mt-4 text-center">
-                <p className="text-lg text-gray-600">
-                  + {queue.filter(g => g.status === 'waiting').length - 8} more groups waiting
-                </p>
               </div>
-            )}
+            ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
 
-        {nextGroups.length === 0 && courtGroups.every(c => c.isAvailable) && (
-          <div className="bg-white/95 rounded-2xl shadow-xl p-12 text-center">
-            <Users size={64} className="mx-auto text-gray-400 mb-4" />
-            <p className="text-3xl font-bold text-gray-600 mb-2">All Courts Available</p>
-            <p className="text-xl text-gray-500">No groups in queue</p>
+export default function TVDisplay() {
+  const { connected, isStale } = useRealtime();
+  const { queueEntries, fetchQueue, subscribeToQueue } = useQueue();
+  const { courts, fetchCourts, subscribeToCourts } = useCourts();
+  const { buildings, fetchBuildings, subscribeToBuildings } = useBuildings();
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+    fetchQueue();
+    fetchCourts();
+    fetchBuildings();
+
+    const unsubQueue = subscribeToQueue();
+    const unsubCourts = subscribeToCourts();
+    const unsubBuildings = subscribeToBuildings();
+
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+
+    return () => {
+      unsubQueue();
+      unsubCourts();
+      unsubBuildings();
+      clearInterval(timer);
+    };
+  }, []);
+
+  const courtsByBuilding = {
+    building_a: courts.filter(c => c.building === 'building_a'),
+    building_b: courts.filter(c => c.building === 'building_b'),
+    building_c: courts.filter(c => c.building === 'building_c'),
+  };
+
+  const waitingQueue = queueEntries.filter(e => e.status === 'waiting');
+
+  const getBuildingStatus = (buildingId: string) => {
+    const building = buildings.find(b => b.id === buildingId);
+    return building?.is_active ?? true; // Default to active if not found
+  };
+
+  return (
+    <div
+      className="h-screen overflow-hidden text-white p-4 flex flex-col"
+      style={{
+        backgroundImage: 'url(/background.png)',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        backgroundAttachment: 'fixed'
+      }}
+    >
+      {/* Header */}
+      <div className="grid grid-cols-3 items-center mb-4 flex-shrink-0">
+        <div className="justify-self-start">
+          <img src="/logo.png" alt="PicklePoint Queue" className="h-28 w-auto" />
+        </div>
+        <div className="text-6xl font-bold justify-self-center" suppressHydrationWarning>
+          {currentTime.toLocaleTimeString()}
+        </div>
+        <div className="flex items-center gap-4 justify-self-end">
+          <div className="text-2xl" suppressHydrationWarning>
+            {currentTime.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
           </div>
-        )}
+        </div>
+      </div>
 
-        {/* Footer */}
-        <div className="mt-6 text-center">
-          <p className="text-blue-200 text-sm">
-            Average session time: {stats.averageDuration} minutes | 
-            Total players today: {stats.totalPlayers}
-          </p>
+      {/* 3-Column Building Layout */}
+      <div className="grid grid-cols-3 gap-4 flex-1 min-h-0">
+        <BuildingColumn
+          building="building_a"
+          buildingName="Building A"
+          courts={courtsByBuilding.building_a}
+          queueEntries={queueEntries}
+          isActive={getBuildingStatus('building_a')}
+        />
+        <BuildingColumn
+          building="building_b"
+          buildingName="Building B"
+          courts={courtsByBuilding.building_b}
+          queueEntries={queueEntries}
+          isActive={getBuildingStatus('building_b')}
+        />
+        <BuildingColumn
+          building="building_c"
+          buildingName="Building C"
+          courts={courtsByBuilding.building_c}
+          queueEntries={queueEntries}
+          isActive={getBuildingStatus('building_c')}
+        />
+      </div>
+
+      {/* Stats Footer */}
+      <div className="mt-4 grid grid-cols-3 gap-4 flex-shrink-0">
+        <div className="bg-black/40 backdrop-blur-md rounded-lg p-4 text-center border border-white/15 shadow-md">
+          <div className="text-sm font-medium text-white/70 uppercase tracking-wider mb-1">Available Courts</div>
+          <div className="text-5xl font-bold text-green-400">
+            {courts.filter(c => c.status === 'available').length}
+          </div>
+        </div>
+        <div className="bg-black/40 backdrop-blur-md rounded-lg p-4 text-center border border-white/15 shadow-md">
+          <div className="text-sm font-medium text-white/70 uppercase tracking-wider mb-1">Active Courts</div>
+          <div className="text-5xl font-bold text-red-400">
+            {courts.filter(c => c.status === 'occupied').length}
+          </div>
+        </div>
+        <div className="bg-black/40 backdrop-blur-md rounded-lg p-4 text-center border border-white/15 shadow-md">
+          <div className="text-sm font-medium text-white/70 uppercase tracking-wider mb-1">Total In Queue</div>
+          <div className="text-5xl font-bold text-blue-400">
+            {waitingQueue.length}
+          </div>
         </div>
       </div>
     </div>
