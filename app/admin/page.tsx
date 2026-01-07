@@ -1,26 +1,102 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { useCourts, useQueue } from '@/store';
+import { useCourts, useQueue, useStore } from '@/store';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
-import { BuildingType, CourtStatus, MatchSuggestion } from '@/types';
+import { CourtStatus, MatchSuggestion } from '@/types';
 import {
   PlayCircle, CheckCircle, Users, Clock, TrendingUp, BarChart3,
-  UserX, AlertTriangle, ChevronDown, ChevronRight, Zap, Activity, Search, Lock, Unlock
+  UserX, AlertTriangle, ChevronDown, ChevronRight, Zap, Activity, Search, Lock, Unlock, GripVertical
 } from 'lucide-react';
 import { skillLevelToPreferenceGroup } from '@/lib/utils/skillLevel';
+import { QRScanner } from '@/components/QRScanner';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+
+// Sortable Queue Item Component
+function SortableQueueItem({ entry, countdown, onRemove }: any) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: entry.id });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 cursor-grab active:cursor-grabbing"
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 flex-1">
+          <GripVertical className="w-4 h-4 text-gray-400" />
+          <span className="font-bold text-sm text-blue-600">#{entry.position}</span>
+          <div className="flex-1">
+            <p className="font-semibold text-sm">{entry.player.name}</p>
+            <p className="text-xs text-gray-500">
+              {skillLevelToPreferenceGroup(entry.player.skill_level) === 'beginner' ? 'Beginner' : 'Intermediate+'}
+              {entry.group_id && ' • Group'}
+            </p>
+            {countdown && (
+              <p className="text-xs text-orange-600 font-mono mt-0.5">
+                <Clock className="w-3 h-3 inline mr-1" />
+                {countdown}
+              </p>
+            )}
+          </div>
+        </div>
+        <Button
+          variant="danger"
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove(entry.id, entry.player.name);
+          }}
+          className="pointer-events-auto"
+        >
+          <UserX className="w-3 h-3" />
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 export default function AdminDashboardRedesign() {
   const router = useRouter();
   const { courts, fetchCourts, assignSession, completeSession, subscribeToCourts } = useCourts();
-  const { queueEntries, fetchQueue, subscribeToQueue } = useQueue();
+  const { queueEntries, fetchQueue, subscribeToQueue, updateQueuePositions } = useQueue();
   const [matchSuggestions, setMatchSuggestions] = useState<Record<string, MatchSuggestion | null>>({});
   const [verifiedPlayers, setVerifiedPlayers] = useState<Record<string, Set<string>>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [verifyingCourtId, setVerifyingCourtId] = useState<string | null>(null);
-  const [collapsedBuildings, setCollapsedBuildings] = useState<Set<string>>(new Set());
   const [queueSearchTerm, setQueueSearchTerm] = useState('');
   const [groupRemovalModal, setGroupRemovalModal] = useState<{
     isOpen: boolean;
@@ -31,16 +107,141 @@ export default function AdminDashboardRedesign() {
     groupMembers: [],
     selectedIds: new Set(),
   });
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [sessions, setSessions] = useState<Record<string, any>>({});
+  const [scanQrInput, setScanQrInput] = useState('');
+  const [scanningQr, setScanningQr] = useState(false);
+  const [matchCompletionModal, setMatchCompletionModal] = useState<{
+    isOpen: boolean;
+    courtId: string;
+    players: any[];
+    teamA: string[];
+    teamB: string[];
+    teamAScore: number;
+    teamBScore: number;
+  }>({
+    isOpen: false,
+    courtId: '',
+    players: [],
+    teamA: [],
+    teamB: [],
+    teamAScore: 0,
+    teamBScore: 0,
+  });
+  const [autoCompletedCourts, setAutoCompletedCourts] = useState<Set<string>>(new Set());
+  
+  // Ref to store current courts for timer checking (avoids stale closure)
+  const courtsRef = useRef(courts);
+  const queueEntriesRef = useRef(queueEntries);
+
+  // Derived state - must be defined early for use in handlers
+  const waitingQueue = queueEntries.filter(e => e.status === 'waiting');
+
+  // Update courts ref whenever courts change
+  useEffect(() => {
+    courtsRef.current = courts;
+  }, [courts]);
+
+  // Update queueEntries ref whenever queueEntries change
+  useEffect(() => {
+    queueEntriesRef.current = queueEntries;
+  }, [queueEntries]);
+
+  // Drag and drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // 8px of movement required before drag starts
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      const oldIndex = waitingQueue.findIndex(e => e.id === active.id);
+      const newIndex = waitingQueue.findIndex(e => e.id === over.id);
+
+      if (oldIndex === -1 || newIndex === -1) {
+        console.error('[Drag] Invalid indices', { oldIndex, newIndex });
+        return;
+      }
+
+      // Reorder locally first for immediate feedback
+      const reordered = arrayMove(waitingQueue, oldIndex, newIndex);
+
+      // Update positions in the database
+      const updates = reordered.map((entry, index) => ({
+        id: entry.id,
+        position: index + 1,
+      }));
+
+      try {
+        await updateQueuePositions(updates);
+      } catch (error) {
+        console.error('[Drag] Failed to update queue positions:', error);
+        alert('Failed to reorder queue: ' + (error as Error).message);
+      }
+    }
+  };
 
   // Hydrate store on mount
   useEffect(() => {
     const { useStore } = require('@/store');
     useStore.persist.rehydrate();
+    
+    // Request notification permission for auto-complete alerts
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
   }, []);
 
   useEffect(() => {
     fetchCourts();
     fetchQueue();
+
+    // Update every second for countdowns
+    const updateInterval = setInterval(() => {
+      const newTime = new Date();
+      setCurrentTime(newTime);
+
+      // Check for expired court timers and auto-open match completion modal
+      // Use courts ref to get current courts data (avoids stale closure)
+      const currentCourts = courtsRef.current;
+      if (currentCourts && Array.isArray(currentCourts)) {
+        currentCourts.forEach((court: any) => {
+        if (court.status === 'occupied' && court.court_timer_started_at) {
+          const startTime = new Date(court.court_timer_started_at).getTime();
+          const twentyMinutesInMs = 20 * 60 * 1000; // 20 minutes for production
+          const elapsed = newTime.getTime() - startTime;
+          const remaining = twentyMinutesInMs - elapsed;
+
+          // If timer just expired (within the last second) and modal isn't already open
+          if (remaining <= 0 && remaining > -1000 && !matchCompletionModal.isOpen && !autoCompletedCourts.has(court.id)) {
+            console.log(`[Auto-Complete] Court ${court.court_number} timer expired, opening match completion modal`);
+            
+            // Show browser notification if possible
+            if ('Notification' in window && Notification.permission === 'granted') {
+              new Notification(`Court ${court.court_number} - Time's Up!`, {
+                body: 'Match completion modal opened automatically',
+                icon: '/favicon.ico'
+              });
+            }
+            
+            setAutoCompletedCourts(prev => new Set([...prev, court.id]));
+            
+            // Use fresh queue data for the modal
+            const freshQueueEntries = queueEntriesRef.current;
+            openMatchCompletionModalWithData(court.id, freshQueueEntries);
+          }
+        }
+      });
+      } // Close the if (courts && Array.isArray(courts)) check
+    }, 1000);
 
     // Check for expired sessions every 2 minutes
     const checkExpiredSessions = async () => {
@@ -63,21 +264,86 @@ export default function AdminDashboardRedesign() {
     const expirationInterval = setInterval(checkExpiredSessions, 2 * 60 * 1000);
 
     return () => {
+      clearInterval(updateInterval);
       clearInterval(expirationInterval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // Remove courts dependency to prevent infinite loop
+
+  // Fetch sessions for countdown
+  useEffect(() => {
+    const fetchSessions = async () => {
+      try {
+        const waiting = queueEntries.filter(e => e.status === 'waiting');
+        const playerIds = waiting.map(e => e.player_id);
+        if (playerIds.length === 0) return;
+
+        const { data } = await (await import('@/lib/supabase/client')).supabase
+          .from('sessions')
+          .select('*')
+          .eq('status', 'active')
+          .in('player_id', playerIds);
+
+        if (data) {
+          const sessionMap: Record<string, any> = {};
+          data.forEach(session => {
+            sessionMap[session.player_id] = session;
+          });
+          setSessions(sessionMap);
+        }
+      } catch (error) {
+        console.error('Error fetching sessions:', error);
+      }
+    };
+
+    fetchSessions();
+  }, [queueEntries]);
+
+  const getSessionCountdown = (playerId: string) => {
+    const session = sessions[playerId];
+    if (!session) return null;
+
+    const startTime = new Date(session.start_time).getTime();
+    const fiveHoursInMs = 5 * 60 * 60 * 1000;
+    const elapsed = currentTime.getTime() - startTime;
+    const remaining = fiveHoursInMs - elapsed;
+
+    if (remaining <= 0) return '0:00:00';
+
+    const hours = Math.floor(remaining / (60 * 60 * 1000));
+    const minutes = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
+    const seconds = Math.floor((remaining % (60 * 1000)) / 1000);
+
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  };
+
+  const getCourtTimerCountdown = (court: any) => {
+    if (!court.court_timer_started_at) return null;
+
+    const startTime = new Date(court.court_timer_started_at).getTime();
+    const twentyMinutesInMs = 20 * 60 * 1000; // 20 minutes for production
+    const elapsed = currentTime.getTime() - startTime;
+    const remaining = twentyMinutesInMs - elapsed;
+
+    if (remaining <= 0) return '0:00';
+
+    const totalSeconds = Math.floor(remaining / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+
+    return `${minutes}:${String(seconds).padStart(2, '0')}`;
+  };
 
   // Keyboard shortcuts removed for now - kept hint for visual reference
 
-  const handleCallNext = async (courtId: string, building: BuildingType) => {
+  const handleCallNext = async (courtId: string) => {
     setLoading({ ...loading, [courtId]: true });
 
     try {
       const response = await fetch('/api/matchmaking/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ court_id: courtId, building }),
+        body: JSON.stringify({ court_id: courtId }),
       });
 
       const data = await response.json();
@@ -116,7 +382,7 @@ export default function AdminDashboardRedesign() {
     setVerifyingCourtId(null);
   };
 
-  const handleReplaceNoShows = async (courtId: string, building: BuildingType) => {
+  const handleReplaceNoShows = async (courtId: string) => {
     const match = matchSuggestions[courtId];
     const verified = verifiedPlayers[courtId];
 
@@ -178,6 +444,7 @@ export default function AdminDashboardRedesign() {
         throw new Error(`Invalid match data: ${invalidPlayers.length} player(s) missing ID`);
       }
 
+      // Verify at least one player has an active session
       const { data: existingSession } = await (await import('@/lib/supabase/client')).supabase
         .from('sessions')
         .select('id')
@@ -189,7 +456,8 @@ export default function AdminDashboardRedesign() {
         throw new Error(`Player ${match.players[0].name} doesn't have an active session. Check them in first at /cashier.`);
       }
 
-      await assignSession(courtId, existingSession.id);
+      // Assign court and start 20-minute timer
+      await assignSession(courtId);
 
       try {
         await fetch('/api/match-history/create', {
@@ -228,6 +496,10 @@ export default function AdminDashboardRedesign() {
       setMatchSuggestions({ ...matchSuggestions, [courtId]: null });
       setVerifiedPlayers({ ...verifiedPlayers, [courtId]: new Set() });
       setVerifyingCourtId(null);
+
+      // Refresh queue to get updated status
+      await fetchQueue();
+      await fetchCourts();
 
       alert('Match started successfully! Players are now on court.');
     } catch (error) {
@@ -275,9 +547,12 @@ export default function AdminDashboardRedesign() {
   };
 
   const handleRemoveFromQueue = async (queueId: string, playerName: string) => {
+    console.log('[Frontend] handleRemoveFromQueue called with:', { queueId, playerName });
+    
     const queueEntry = queueEntries.find(e => e.id === queueId);
 
     if (queueEntry?.group_id) {
+      console.log('[Frontend] Player is in a group, showing group removal modal');
       const groupMembers = queueEntries.filter(e => e.group_id === queueEntry.group_id);
 
       setGroupRemovalModal({
@@ -288,16 +563,22 @@ export default function AdminDashboardRedesign() {
       return;
     }
 
+    console.log('[Frontend] Showing removal confirmation dialog');
     const removalType = confirm(
       `Remove ${playerName} from queue?\n\n` +
       `Click OK if they LEFT or NO-SHOW (ends their session)\n` +
       `Click Cancel if they're just TAKING A BREAK (keeps session active)`
     );
 
-    if (removalType === null) return;
+    if (removalType === null) {
+      console.log('[Frontend] User cancelled removal');
+      return;
+    }
 
     const reason = removalType ? 'left_facility' : 'temporary_break';
     const shouldEndSession = removalType;
+
+    console.log('[Frontend] About to call API with:', { queueId, reason, shouldEndSession });
 
     try {
       const response = await fetch('/api/queue/remove', {
@@ -310,7 +591,9 @@ export default function AdminDashboardRedesign() {
         }),
       });
 
+      console.log('[Frontend] API response status:', response.status);
       const data = await response.json();
+      console.log('[Frontend] API response data:', data);
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to remove player');
@@ -322,8 +605,11 @@ export default function AdminDashboardRedesign() {
         alert(`${data.player_name} removed from queue. Session still active - they can rejoin when back.`);
       }
 
+      console.log('[Frontend] About to refresh queue');
       await fetchQueue();
+      console.log('[Frontend] Queue refreshed');
     } catch (error) {
+      console.error('[Frontend] Error removing player:', error);
       alert('Failed to remove player: ' + (error as Error).message);
     }
   };
@@ -433,46 +719,194 @@ export default function AdminDashboardRedesign() {
     }
   };
 
-  const toggleBuildingCollapse = (building: string) => {
-    const newCollapsed = new Set(collapsedBuildings);
-    if (newCollapsed.has(building)) {
-      newCollapsed.delete(building);
-    } else {
-      newCollapsed.add(building);
+  const handleScanToRejoin = async (e?: React.FormEvent, qrCode?: string) => {
+    e?.preventDefault();
+
+    const codeToUse = qrCode || scanQrInput.trim();
+
+    if (!codeToUse) {
+      alert('Please enter a QR code');
+      return;
     }
-    setCollapsedBuildings(newCollapsed);
+
+    setScanningQr(true);
+    try {
+      const response = await fetch('/api/queue/scan-to-rejoin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ qr_uuid: codeToUse }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        alert(data.error || 'Failed to rejoin queue');
+        return;
+      }
+
+      alert(`✓ Player added to queue at position ${data.queue_position}`);
+      setScanQrInput('');
+      await fetchQueue();
+    } catch (error) {
+      alert('Failed to rejoin queue: ' + (error as Error).message);
+    } finally {
+      setScanningQr(false);
+    }
   };
 
-  const courtsByBuilding = {
-    building_a: courts.filter(c => c.building === 'building_a'),
-    building_b: courts.filter(c => c.building === 'building_b'),
-    building_c: courts.filter(c => c.building === 'building_c'),
+  const openMatchCompletionModal = (courtId: string) => {
+    openMatchCompletionModalWithData(courtId, queueEntries);
   };
 
-  const waitingQueue = queueEntries.filter(e => e.status === 'waiting');
+  const openMatchCompletionModalWithData = (courtId: string, entries: any[]) => {
+    // Get players currently on this court
+    const playingOnCourt = entries.filter(
+      e => e.status === 'playing' && e.court_id === courtId
+    );
+
+    console.log(`[Auto-Complete Debug] Court ${courtId}:`, {
+      totalEntries: entries.length,
+      playingOnCourt: playingOnCourt.length,
+      allStatuses: entries.map(e => ({ name: e.player?.name, status: e.status, court_id: e.court_id }))
+    });
+
+    if (playingOnCourt.length !== 4) {
+      alert(`Expected 4 players on court, found ${playingOnCourt.length}`);
+      return;
+    }
+
+    // Auto-assign teams (first 2 to Team A, last 2 to Team B)
+    const playerIds = playingOnCourt.map(e => e.player_id);
+
+    setMatchCompletionModal({
+      isOpen: true,
+      courtId,
+      players: playingOnCourt,
+      teamA: [playerIds[0], playerIds[1]],
+      teamB: [playerIds[2], playerIds[3]],
+      teamAScore: 0,
+      teamBScore: 0,
+    });
+  };
+
+  const movePlayerToTeam = (playerId: string, fromTeam: 'A' | 'B') => {
+    const { teamA, teamB } = matchCompletionModal;
+
+    if (fromTeam === 'A') {
+      // Move from Team A to Team B
+      if (teamB.length >= 2) {
+        // If Team B is full, we need to swap - move the first player from Team B to Team A
+        const playerToSwap = teamB[0]; // Take the first player from Team B
+        const newTeamA = teamA.filter(id => id !== playerId).concat(playerToSwap);
+        const newTeamB = teamB.filter(id => id !== playerToSwap).concat(playerId);
+        
+        setMatchCompletionModal({
+          ...matchCompletionModal,
+          teamA: newTeamA,
+          teamB: newTeamB,
+        });
+      } else {
+        // Team B has space, just move the player
+        const newTeamA = teamA.filter(id => id !== playerId);
+        const newTeamB = [...teamB, playerId];
+        setMatchCompletionModal({
+          ...matchCompletionModal,
+          teamA: newTeamA,
+          teamB: newTeamB,
+        });
+      }
+    } else {
+      // Move from Team B to Team A
+      if (teamA.length >= 2) {
+        // If Team A is full, we need to swap - move the first player from Team A to Team B
+        const playerToSwap = teamA[0]; // Take the first player from Team A
+        const newTeamB = teamB.filter(id => id !== playerId).concat(playerToSwap);
+        const newTeamA = teamA.filter(id => id !== playerToSwap).concat(playerId);
+        
+        setMatchCompletionModal({
+          ...matchCompletionModal,
+          teamA: newTeamA,
+          teamB: newTeamB,
+        });
+      } else {
+        // Team A has space, just move the player
+        const newTeamB = teamB.filter(id => id !== playerId);
+        const newTeamA = [...teamA, playerId];
+        setMatchCompletionModal({
+          ...matchCompletionModal,
+          teamA: newTeamA,
+          teamB: newTeamB,
+        });
+      }
+    }
+  };
+
+  const handleCompleteMatch = async () => {
+    const { courtId, teamA, teamB, teamAScore, teamBScore } = matchCompletionModal;
+
+    if (teamA.length !== 2 || teamB.length !== 2) {
+      alert('Each team must have exactly 2 players');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/match-history/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          court_id: courtId,
+          team_a_player_1_id: teamA[0],
+          team_a_player_2_id: teamA[1],
+          team_b_player_1_id: teamB[0],
+          team_b_player_2_id: teamB[1],
+          team_a_score: teamAScore,
+          team_b_score: teamBScore,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to complete match');
+      }
+
+      const winner = teamAScore > teamBScore ? 'Team A' : teamBScore > teamAScore ? 'Team B' : 'Tie';
+      alert(`✓ Match completed! ${winner} wins (${teamAScore}-${teamBScore})`);
+
+      // Clear the auto-completed flag for this court
+      setAutoCompletedCourts(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(courtId);
+        return newSet;
+      });
+
+      setMatchCompletionModal({
+        isOpen: false,
+        courtId: '',
+        players: [],
+        teamA: [],
+        teamB: [],
+        teamAScore: 0,
+        teamBScore: 0,
+      });
+
+      await fetchQueue();
+      await fetchCourts();
+    } catch (error) {
+      alert('Failed to complete match: ' + (error as Error).message);
+    }
+  };
+
   const availableCourts = courts.filter(c => c.status === 'available');
   const occupiedCourts = courts.filter(c => c.status === 'occupied');
   const reservedCourts = courts.filter(c => c.status === 'reserved');
 
-  // Get suggested next court (highest priority building)
+  // Get suggested next court (first available court with enough players in queue)
   const getSuggestedNextCourt = () => {
-    const buildingPriority = ['building_a', 'building_b', 'building_c'].map(building => {
-      const buildingCourts = courts.filter(c => c.building === building);
-      const availableCount = buildingCourts.filter(c => c.status === 'available').length;
-      const queueCount = waitingQueue.filter(e => e.building === building).length;
-      const firstAvailable = buildingCourts.find(c => c.status === 'available');
-
-      return {
-        building,
-        availableCount,
-        queueCount,
-        priority: queueCount / Math.max(availableCount, 1), // Queue density
-        firstAvailable,
-      };
-    }).filter(b => b.availableCount > 0 && b.queueCount >= 4)
-      .sort((a, b) => b.priority - a.priority);
-
-    return buildingPriority[0]?.firstAvailable || null;
+    if (waitingQueue.length >= 4) {
+      return availableCourts[0] || null;
+    }
+    return null;
   };
 
   const suggestedCourt = getSuggestedNextCourt();
@@ -487,7 +921,7 @@ export default function AdminDashboardRedesign() {
       return (
         <button
           key={court.id}
-          onClick={() => handleCallNext(court.id, court.building)}
+          onClick={() => handleCallNext(court.id)}
           disabled={loading[court.id] || (verifyingCourtId !== null && verifyingCourtId !== court.id)}
           className={`p-3 rounded-lg border-2 text-left transition-all ${
             isSuggested
@@ -588,7 +1022,7 @@ export default function AdminDashboardRedesign() {
                       <Button
                         size="sm"
                         variant="danger"
-                        onClick={() => handleReplaceNoShows(court.id, court.building)}
+                        onClick={() => handleReplaceNoShows(court.id)}
                         className="w-full"
                       >
                         <UserX className="w-4 h-4 mr-2" />
@@ -609,7 +1043,7 @@ export default function AdminDashboardRedesign() {
               ) : (
                 <Button
                   size="sm"
-                  onClick={() => handleCallNext(court.id, court.building)}
+                  onClick={() => handleCallNext(court.id)}
                   disabled={loading[court.id] || (verifyingCourtId !== null && verifyingCourtId !== court.id)}
                   className="w-full"
                 >
@@ -646,18 +1080,37 @@ export default function AdminDashboardRedesign() {
             </div>
           ) : (
             <div className="space-y-3">
-              <div className="flex items-center gap-2 text-sm text-gray-600">
-                <Clock className="w-4 h-4" />
-                <span>Session in progress...</span>
-              </div>
+              {(() => {
+                const countdown = getCourtTimerCountdown(court);
+                const isOvertime = countdown === '0:00';
+                return (
+                  <>
+                    <div className={`flex items-center justify-between p-3 rounded-lg ${
+                      isOvertime ? 'bg-red-50 border-2 border-red-300' : 'bg-blue-50 border border-blue-200'
+                    }`}>
+                      <div className="flex items-center gap-2">
+                        <Clock className={`w-5 h-5 ${isOvertime ? 'text-red-600' : 'text-blue-600'}`} />
+                        <span className={`text-sm font-medium ${isOvertime ? 'text-red-900' : 'text-blue-900'}`}>
+                          {isOvertime ? 'Overtime!' : 'Time Remaining'}
+                        </span>
+                      </div>
+                      <span className={`text-2xl font-bold font-mono ${
+                        isOvertime ? 'text-red-600 animate-pulse' : 'text-blue-600'
+                      }`}>
+                        {countdown || '20:00'}
+                      </span>
+                    </div>
+                  </>
+                );
+              })()}
               <Button
                 size="sm"
                 variant="success"
-                onClick={() => court.current_session_id && handleCompleteSession(court.id, court.current_session_id)}
+                onClick={() => openMatchCompletionModal(court.id)}
                 className="w-full"
               >
                 <CheckCircle className="w-4 h-4 mr-2" />
-                Complete Session
+                Complete Match
               </Button>
             </div>
           )}
@@ -666,73 +1119,6 @@ export default function AdminDashboardRedesign() {
     );
   };
 
-  const renderBuildingSection = (
-    buildingKey: string,
-    buildingName: string,
-    buildingColor: string,
-    buildingCourts: any[]
-  ) => {
-    const isCollapsed = collapsedBuildings.has(buildingKey);
-    const available = buildingCourts.filter(c => c.status === 'available').length;
-    const occupied = buildingCourts.filter(c => c.status === 'occupied').length;
-    const buildingQueue = waitingQueue.filter(e => e.building === buildingKey);
-    const hasAvailableWithSuggestion = buildingCourts.some(c => c.status === 'available' && matchSuggestions[c.id]);
-
-    return (
-      <div key={buildingKey} className="border rounded-lg overflow-hidden">
-        <button
-          onClick={() => toggleBuildingCollapse(buildingKey)}
-          className="w-full bg-gray-50 hover:bg-gray-100 transition-colors"
-        >
-          <div className="p-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              {isCollapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-              <div className={`w-3 h-3 rounded-full ${buildingColor}`}></div>
-              <h2 className="text-xl font-bold">{buildingName}</h2>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="text-sm">
-                <span className="text-green-600 font-bold">{available}</span>
-                <span className="text-gray-500"> available</span>
-                <span className="mx-2">•</span>
-                <span className="text-gray-600 font-bold">{occupied}</span>
-                <span className="text-gray-500"> occupied</span>
-                <span className="mx-2">•</span>
-                <span className="text-blue-600 font-bold">{buildingQueue.length}</span>
-                <span className="text-gray-500"> waiting</span>
-              </div>
-              {hasAvailableWithSuggestion && (
-                <div className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-medium">
-                  Verifying Match
-                </div>
-              )}
-            </div>
-          </div>
-        </button>
-
-        {!isCollapsed && (
-          <div className="p-4 bg-white">
-            <div className="grid grid-cols-3 gap-4">
-              {/* Available courts first */}
-              {buildingCourts
-                .filter(c => c.status === 'available')
-                .map(court => renderCourt(court))}
-
-              {/* Reserved courts second */}
-              {buildingCourts
-                .filter(c => c.status === 'reserved')
-                .map(court => renderCourt(court))}
-
-              {/* Occupied courts last (visually de-emphasized) */}
-              {buildingCourts
-                .filter(c => c.status === 'occupied')
-                .map(court => renderCourt(court))}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
 
   return (
     <div className="min-h-screen bg-gray-100 flex">
@@ -762,140 +1148,83 @@ export default function AdminDashboardRedesign() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* Building A Queue */}
-          <div>
-            <h3 className="text-sm font-bold mb-2 flex items-center gap-2 text-gray-700">
-              <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-              Building A ({waitingQueue.filter(e => e.building === 'building_a').length})
-            </h3>
-            <div className="space-y-2">
-              {waitingQueue
-                .filter(e => e.building === 'building_a')
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <div className="flex-1 overflow-y-auto p-4 space-y-2">
+            {(() => {
+              // Filter and sort queue first to ensure SortableContext and rendered items match
+              const filteredQueue = waitingQueue
                 .filter(e => queueSearchTerm === '' || e.player.name.toLowerCase().includes(queueSearchTerm.toLowerCase()))
-                .sort((a, b) => new Date(a.joined_at).getTime() - new Date(b.joined_at).getTime())
-                .map((entry, index) => (
-                  <Card key={entry.id} className="shadow-sm">
-                    <CardBody className="p-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 flex-1">
-                          <span className="font-bold text-sm text-blue-600">#{index + 1}</span>
-                          <div className="flex-1">
-                            <p className="font-semibold text-sm">{entry.player.name}</p>
-                            <p className="text-xs text-gray-500">
-                              {skillLevelToPreferenceGroup(entry.player.skill_level) === 'beginner' ? 'Beginner' : 'Intermediate+'}
-                              {entry.group_id && ' • Group'}
-                            </p>
-                          </div>
-                        </div>
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          onClick={() => handleRemoveFromQueue(entry.id, entry.player.name)}
-                        >
-                          <UserX className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    </CardBody>
-                  </Card>
-                ))}
-              {waitingQueue.filter(e => e.building === 'building_a').length === 0 && (
-                <div className="text-center py-3 text-gray-400 text-xs">
-                  No players waiting
-                </div>
-              )}
-            </div>
-          </div>
+                .sort((a, b) => a.position - b.position);
 
-          {/* Building B Queue */}
-          <div>
-            <h3 className="text-sm font-bold mb-2 flex items-center gap-2 text-gray-700">
-              <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-              Building B ({waitingQueue.filter(e => e.building === 'building_b').length})
-            </h3>
-            <div className="space-y-2">
-              {waitingQueue
-                .filter(e => e.building === 'building_b')
-                .filter(e => queueSearchTerm === '' || e.player.name.toLowerCase().includes(queueSearchTerm.toLowerCase()))
-                .sort((a, b) => new Date(a.joined_at).getTime() - new Date(b.joined_at).getTime())
-                .map((entry, index) => (
-                  <Card key={entry.id} className="shadow-sm">
-                    <CardBody className="p-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 flex-1">
-                          <span className="font-bold text-sm text-green-600">#{index + 1}</span>
-                          <div className="flex-1">
-                            <p className="font-semibold text-sm">{entry.player.name}</p>
-                            <p className="text-xs text-gray-500">
-                              {skillLevelToPreferenceGroup(entry.player.skill_level) === 'beginner' ? 'Beginner' : 'Intermediate+'}
-                              {entry.group_id && ' • Group'}
-                            </p>
-                          </div>
-                        </div>
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          onClick={() => handleRemoveFromQueue(entry.id, entry.player.name)}
-                        >
-                          <UserX className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    </CardBody>
-                  </Card>
-                ))}
-              {waitingQueue.filter(e => e.building === 'building_b').length === 0 && (
-                <div className="text-center py-3 text-gray-400 text-xs">
-                  No players waiting
-                </div>
-              )}
-            </div>
+              return (
+                <SortableContext
+                  items={filteredQueue.map(e => e.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {filteredQueue.map((entry) => {
+                    const countdown = getSessionCountdown(entry.player_id);
+                    return (
+                      <SortableQueueItem
+                        key={entry.id}
+                        entry={entry}
+                        countdown={countdown}
+                        onRemove={handleRemoveFromQueue}
+                      />
+                    );
+                  })}
+                </SortableContext>
+              );
+            })()}
+            {waitingQueue.length === 0 && (
+              <div className="text-center py-8 text-gray-400">
+                No players in queue
+              </div>
+            )}
           </div>
+        </DndContext>
+                {/* Scan to Rejoin Queue */}
+        <div className="p-3 border-b bg-green-50 border-green-200">
+          <label className="text-sm font-semibold text-green-900 flex items-center gap-1 mb-2">
+            <Activity className="w-4 h-4" />
+            Scan QR to Rejoin Queue
+          </label>
 
-          {/* Building C Queue */}
-          <div>
-            <h3 className="text-sm font-bold mb-2 flex items-center gap-2 text-gray-700">
-              <div className="w-3 h-3 bg-purple-500 rounded-full"></div>
-              Building C ({waitingQueue.filter(e => e.building === 'building_c').length})
-            </h3>
-            <div className="space-y-2">
-              {waitingQueue
-                .filter(e => e.building === 'building_c')
-                .filter(e => queueSearchTerm === '' || e.player.name.toLowerCase().includes(queueSearchTerm.toLowerCase()))
-                .sort((a, b) => new Date(a.joined_at).getTime() - new Date(b.joined_at).getTime())
-                .map((entry, index) => (
-                  <Card key={entry.id} className="shadow-sm">
-                    <CardBody className="p-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 flex-1">
-                          <span className="font-bold text-sm text-purple-600">#{index + 1}</span>
-                          <div className="flex-1">
-                            <p className="font-semibold text-sm">{entry.player.name}</p>
-                            <p className="text-xs text-gray-500">
-                              {skillLevelToPreferenceGroup(entry.player.skill_level) === 'beginner' ? 'Beginner' : 'Intermediate+'}
-                              {entry.group_id && ' • Group'}
-                            </p>
-                          </div>
-                        </div>
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          onClick={() => handleRemoveFromQueue(entry.id, entry.player.name)}
-                        >
-                          <UserX className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    </CardBody>
-                  </Card>
-                ))}
-              {waitingQueue.filter(e => e.building === 'building_c').length === 0 && (
-                <div className="text-center py-3 text-gray-400 text-xs">
-                  No players waiting
-                </div>
-              )}
+          {/* QR Scanner */}
+          <QRScanner
+            onScan={(qrCode) => {
+              handleScanToRejoin(undefined, qrCode);
+            }}
+          />
+
+          {/* Manual Entry */}
+          <form onSubmit={handleScanToRejoin} className="space-y-2 mt-3">
+            <label className="text-xs text-green-800">Or enter manually:</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Enter player QR code..."
+                value={scanQrInput}
+                onChange={(e) => setScanQrInput(e.target.value)}
+                className="flex-1 px-3 py-2 text-sm border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                disabled={scanningQr}
+              />
+              <Button
+                type="submit"
+                size="sm"
+                disabled={scanningQr || !scanQrInput.trim()}
+                className="bg-green-600 hover:bg-green-700 text-white"
+              >
+                {scanningQr ? 'Adding...' : 'Add'}
+              </Button>
             </div>
-          </div>
+          </form>
         </div>
       </div>
+      
 
       {/* MAIN CONTENT AREA */}
       <div className="flex-1 overflow-y-auto">
@@ -958,14 +1287,12 @@ export default function AdminDashboardRedesign() {
                   <div>
                     <div className="font-bold text-yellow-900">Suggested Next Action</div>
                     <div className="text-sm text-yellow-700">
-                      Call next for Court {suggestedCourt.court_number} (
-                      {suggestedCourt.building === 'building_a' ? 'Building A' :
-                       suggestedCourt.building === 'building_b' ? 'Building B' : 'Building C'})
+                      Call next for Court {suggestedCourt.court_number}
                     </div>
                   </div>
                 </div>
                 <Button
-                  onClick={() => handleCallNext(suggestedCourt.id, suggestedCourt.building)}
+                  onClick={() => handleCallNext(suggestedCourt.id)}
                   className="bg-yellow-500 hover:bg-yellow-600"
                 >
                   <PlayCircle className="w-4 h-4 mr-2" />
@@ -975,11 +1302,40 @@ export default function AdminDashboardRedesign() {
             )}
           </div>
 
-          {/* COLLAPSIBLE BUILDING SECTIONS */}
-          <div className="space-y-4">
-            {renderBuildingSection('building_a', 'Building A', 'bg-blue-500', courtsByBuilding.building_a)}
-            {renderBuildingSection('building_b', 'Building B', 'bg-green-500', courtsByBuilding.building_b)}
-            {renderBuildingSection('building_c', 'Building C', 'bg-purple-500', courtsByBuilding.building_c)}
+          {/* COURTS SECTION */}
+          <div className="border rounded-lg overflow-hidden">
+            <div className="p-4 bg-gray-50">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold">All Courts</h2>
+                <div className="flex items-center gap-4">
+                  <div className="text-sm">
+                    <span className="text-green-600 font-bold">{availableCourts.length}</span>
+                    <span className="text-gray-500"> available</span>
+                    <span className="mx-2">•</span>
+                    <span className="text-gray-600 font-bold">{occupiedCourts.length}</span>
+                    <span className="text-gray-500"> occupied</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="p-4 bg-white">
+              <div className="grid grid-cols-3 gap-4">
+                {/* Available courts first */}
+                {courts
+                  .filter(c => c.status === 'available')
+                  .map(court => renderCourt(court))}
+
+                {/* Reserved courts second */}
+                {courts
+                  .filter(c => c.status === 'reserved')
+                  .map(court => renderCourt(court))}
+
+                {/* Occupied courts last */}
+                {courts
+                  .filter(c => c.status === 'occupied')
+                  .map(court => renderCourt(court))}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1047,6 +1403,154 @@ export default function AdminDashboardRedesign() {
                     Remove Selected ({groupRemovalModal.selectedIds.size})
                   </Button>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Match Completion Modal */}
+      {matchCompletionModal.isOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4">
+            <div className="p-6">
+              <h3 className="text-2xl font-bold mb-4">Complete Match - Court {courts.find(c => c.id === matchCompletionModal.courtId)?.court_number}</h3>
+
+              {/* Team Assignment */}
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                {/* Team A */}
+                <div className="border-2 border-blue-500 rounded-lg p-4 bg-blue-50">
+                  <h4 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
+                    <Users className="w-5 h-5" />
+                    Team A
+                  </h4>
+                  <div className="space-y-2">
+                    {matchCompletionModal.teamA.map((playerId, idx) => {
+                      const entry = matchCompletionModal.players.find(p => p.player_id === playerId);
+                      return (
+                        <div key={idx} className="bg-white p-2 rounded border border-blue-300 flex items-center justify-between">
+                          <div className="flex-1">
+                            <p className="font-semibold text-sm">{entry?.player?.name || 'Unknown'}</p>
+                            <p className="text-xs text-gray-600">{entry?.player?.skill_level}</p>
+                          </div>
+                          <button
+                            onClick={() => movePlayerToTeam(playerId, 'A')}
+                            className="ml-2 px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 transition"
+                            title="Move to Team B"
+                          >
+                            →
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-3">
+                    <label className="text-sm font-semibold text-blue-900 block mb-1">Score:</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={matchCompletionModal.teamAScore}
+                      onChange={(e) => setMatchCompletionModal({
+                        ...matchCompletionModal,
+                        teamAScore: parseInt(e.target.value) || 0
+                      })}
+                      className="w-full px-3 py-2 border-2 border-blue-300 rounded-lg text-2xl font-bold text-center"
+                    />
+                  </div>
+                </div>
+
+                {/* Team B */}
+                <div className="border-2 border-red-500 rounded-lg p-4 bg-red-50">
+                  <h4 className="font-bold text-red-900 mb-3 flex items-center gap-2">
+                    <Users className="w-5 h-5" />
+                    Team B
+                  </h4>
+                  <div className="space-y-2">
+                    {matchCompletionModal.teamB.map((playerId, idx) => {
+                      const entry = matchCompletionModal.players.find(p => p.player_id === playerId);
+                      return (
+                        <div key={idx} className="bg-white p-2 rounded border border-red-300 flex items-center justify-between">
+                          <button
+                            onClick={() => movePlayerToTeam(playerId, 'B')}
+                            className="mr-2 px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition"
+                            title="Move to Team A"
+                          >
+                            ←
+                          </button>
+                          <div className="flex-1">
+                            <p className="font-semibold text-sm">{entry?.player?.name || 'Unknown'}</p>
+                            <p className="text-xs text-gray-600">{entry?.player?.skill_level}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-3">
+                    <label className="text-sm font-semibold text-red-900 block mb-1">Score:</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={matchCompletionModal.teamBScore}
+                      onChange={(e) => setMatchCompletionModal({
+                        ...matchCompletionModal,
+                        teamBScore: parseInt(e.target.value) || 0
+                      })}
+                      className="w-full px-3 py-2 border-2 border-red-300 rounded-lg text-2xl font-bold text-center"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Winner Display */}
+              {(matchCompletionModal.teamAScore > 0 || matchCompletionModal.teamBScore > 0) && (
+                <div className="mb-4 p-3 bg-yellow-50 border-2 border-yellow-400 rounded-lg text-center">
+                  <p className="font-bold text-yellow-900">
+                    {matchCompletionModal.teamAScore > matchCompletionModal.teamBScore
+                      ? '🏆 Team A Wins!'
+                      : matchCompletionModal.teamBScore > matchCompletionModal.teamAScore
+                      ? '🏆 Team B Wins!'
+                      : '🤝 Tie Game'}
+                  </p>
+                  <p className="text-sm text-yellow-800 mt-1">
+                    Final Score: {matchCompletionModal.teamAScore} - {matchCompletionModal.teamBScore}
+                  </p>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex gap-3">
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    // Clear the auto-completed flag for this court when manually cancelled
+                    setAutoCompletedCourts(prev => {
+                      const newSet = new Set(prev);
+                      newSet.delete(matchCompletionModal.courtId);
+                      return newSet;
+                    });
+                    
+                    setMatchCompletionModal({
+                      isOpen: false,
+                      courtId: '',
+                      players: [],
+                      teamA: [],
+                      teamB: [],
+                      teamAScore: 0,
+                      teamBScore: 0,
+                    });
+                  }}
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="success"
+                  onClick={handleCompleteMatch}
+                  className="flex-1"
+                >
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  Complete Match & Update Stats
+                </Button>
               </div>
             </div>
           </div>

@@ -66,20 +66,29 @@ export function QRScanner({ onScan, onError }: QRScannerProps) {
   const stopScanning = async () => {
     try {
       if (scannerRef.current) {
-        // Try to stop - ignore if already stopped
-        try {
-          await scannerRef.current.stop();
-        } catch (stopErr) {
-          // Scanner already stopped or not running - that's fine
+        // Check if scanner is actually running before trying to stop
+        const scannerState = scannerRef.current.getState();
+        
+        if (scannerState === 2) { // Html5QrcodeScannerState.SCANNING
+          try {
+            await scannerRef.current.stop();
+          } catch (stopErr) {
+            console.warn('Scanner stop error (ignored):', stopErr);
+            // Scanner already stopped or not running - that's fine
+          }
         }
 
         // Try to clear - ignore errors
         try {
           await scannerRef.current.clear();
         } catch (clearErr) {
+          console.warn('Scanner clear error (ignored):', clearErr);
           // Ignore clear errors
         }
       }
+    } catch (err) {
+      console.warn('Scanner cleanup error (ignored):', err);
+      // Ignore all scanner cleanup errors
     } finally {
       // Always update UI state no matter what
       setIsScanning(false);
@@ -89,13 +98,20 @@ export function QRScanner({ onScan, onError }: QRScannerProps) {
   useEffect(() => {
     return () => {
       // Cleanup on unmount
-      if (scannerRef.current && isScanning) {
-        scannerRef.current.stop().catch(() => {
-          // Silently ignore - scanner already stopped
-        });
+      if (scannerRef.current) {
+        try {
+          const scannerState = scannerRef.current.getState();
+          if (scannerState === 2) { // Html5QrcodeScannerState.SCANNING
+            scannerRef.current.stop().catch((err) => {
+              console.warn('Scanner cleanup on unmount error (ignored):', err);
+            });
+          }
+        } catch (err) {
+          console.warn('Scanner state check error on unmount (ignored):', err);
+        }
       }
     };
-  }, [isScanning]);
+  }, []);
 
   return (
     <div className="space-y-4">

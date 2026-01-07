@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
     // Update queue entries for these players if they're in the queue
     const { data: queueEntries } = await supabaseServer
       .from('queue')
-      .select('id, player_id, position, building')
+      .select('id, player_id, position')
       .in('player_id', member_ids)
       .eq('status', 'waiting');
 

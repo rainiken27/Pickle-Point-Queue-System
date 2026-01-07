@@ -1,5 +1,4 @@
 export type SessionStatus = 'active' | 'completed' | 'expired' | 'grace_period';
-export type BuildingType = 'building_a' | 'building_b' | 'building_c';
 
 export interface Session {
   id: string;
@@ -7,7 +6,6 @@ export interface Session {
   start_time: string;
   end_time: string | null;
   duration_minutes: number | null;
-  building: BuildingType;
   status: SessionStatus;
   team1_score: number | null;
   team2_score: number | null;
@@ -23,7 +21,6 @@ export interface ActiveSession extends Session {
 
 export interface NewSession {
   player_id: string;
-  building: BuildingType;
 }
 
 export interface CompleteSessionData {

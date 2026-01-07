@@ -5,9 +5,6 @@ import QRCode from 'react-qr-code';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
-import { supabase } from '@/lib/supabase/client';
-import { PlayerSchema } from '@/lib/utils/validation';
-import { z } from 'zod';
 import { Users } from 'lucide-react';
 
 export default function RegisterPage() {
@@ -28,50 +25,41 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
-      // Validate form data
-      const validatedData = PlayerSchema.parse(formData);
+      // Call registration API
+      const response = await fetch('/api/players/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
+      });
 
-      // Check if email already exists
-      const { data: existingPlayer } = await supabase
-        .from('players')
-        .select('email')
-        .eq('email', validatedData.email)
-        .single();
+      const data = await response.json();
 
-      if (existingPlayer) {
-        setErrors({ email: 'This email is already registered. Please use a different email or contact staff.' });
-        return;
+      if (!response.ok) {
+        // Handle email conflict error
+        if (response.status === 409) {
+          setErrors({ email: data.error });
+          return;
+        }
+
+        // Handle validation errors
+        if (data.details) {
+          const fieldErrors: Record<string, string> = {};
+          data.details.forEach((err: any) => {
+            if (err.path[0]) {
+              fieldErrors[err.path[0] as string] = err.message;
+            }
+          });
+          setErrors(fieldErrors);
+          return;
+        }
+
+        throw new Error(data.error || 'Registration failed');
       }
-
-      // Insert player into database
-      const { data: player, error } = await supabase
-        .from('players')
-        .insert({
-          name: validatedData.name,
-          email: validatedData.email,
-          skill_level: validatedData.skill_level,
-          gender: validatedData.gender,
-          photo_url: validatedData.photo_url || null,
-        })
-        .select('qr_uuid')
-        .single();
-
-      if (error) throw error;
 
       // Show QR code
-      setGeneratedQR(player.qr_uuid);
+      setGeneratedQR(data.player.qr_uuid);
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        const fieldErrors: Record<string, string> = {};
-        error.issues.forEach(err => {
-          if (err.path[0]) {
-            fieldErrors[err.path[0] as string] = err.message;
-          }
-        });
-        setErrors(fieldErrors);
-      } else {
-        alert('Failed to register player: ' + (error as Error).message);
-      }
+      alert('Failed to register player: ' + (error as Error).message);
     } finally {
       setLoading(false);
     }

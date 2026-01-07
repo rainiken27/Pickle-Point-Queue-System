@@ -4,13 +4,17 @@ import { z } from 'zod';
 
 const StartSessionSchema = z.object({
   player_id: z.string().uuid(),
-  building: z.enum(['building_a', 'building_b', 'building_c']),
+  preferences: z.object({
+    skill_level_pref: z.enum(['beginner', 'intermediate_advanced']),
+    gender_pref: z.enum(['mens', 'womens', 'mixed', 'random']),
+    match_type: z.enum(['solo', 'group']),
+  }).optional(),
 });
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { player_id, building } = StartSessionSchema.parse(body);
+    const { player_id, preferences } = StartSessionSchema.parse(body);
 
     // Check if player already has an active session
     const { data: existingSessions } = await supabaseServer
@@ -50,7 +54,6 @@ export async function POST(request: NextRequest) {
       .from('sessions')
       .insert({
         player_id,
-        building,
         status: 'active',
         start_time: new Date().toISOString(),
       })
@@ -58,6 +61,21 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) throw error;
+
+    // Upsert player preferences if provided
+    if (preferences) {
+      const { error: prefsError } = await supabaseServer
+        .from('player_preferences')
+        .upsert({
+          player_id,
+          ...preferences,
+        });
+
+      if (prefsError) {
+        console.error('Failed to update preferences:', prefsError);
+        // Don't fail the whole request if preferences update fails
+      }
+    }
 
     return NextResponse.json({ session: newSession }, { status: 201 });
   } catch (error) {

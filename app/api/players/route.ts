@@ -12,8 +12,7 @@ export async function GET() {
           id,
           status,
           start_time,
-          end_time,
-          building
+          end_time
         )
       `)
       .eq('sessions.status', 'active')

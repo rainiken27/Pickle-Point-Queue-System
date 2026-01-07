@@ -74,18 +74,15 @@ FROM players;
 ALTER TABLE players ENABLE ROW LEVEL SECURITY;
 ALTER TABLE player_preferences ENABLE ROW LEVEL SECURITY;
 
--- Re-insert courts that were truncated by CASCADE (9 courts total: 3 per building)
-INSERT INTO courts (court_number, building, status) VALUES
-  (1, 'building_a', 'available'),
-  (2, 'building_a', 'available'),
-  (3, 'building_a', 'available'),
-  (4, 'building_b', 'available'),
-  (5, 'building_b', 'available'),
-  (6, 'building_b', 'available'),
-  (7, 'building_c', 'available'),
-  (8, 'building_c', 'available'),
-  (9, 'building_c', 'available')
-ON CONFLICT (court_number, building) DO NOTHING;
+-- Re-insert courts that were truncated by CASCADE (6 courts total for single facility)
+INSERT INTO courts (court_number, status) VALUES
+  (1, 'available'),
+  (2, 'available'),
+  (3, 'available'),
+  (4, 'available'),
+  (5, 'available'),
+  (6, 'available')
+ON CONFLICT (court_number) DO NOTHING;
 
 -- Display summary
 SELECT

@@ -344,7 +344,7 @@ export default function GroupsManagementPage() {
                                     {player.skill_level} • {player.gender}
                                     {(player as any).active_session && (
                                       <span className="ml-1 text-blue-600">
-                                        • {(player as any).active_session.building.replace('_', ' ').toUpperCase()}
+                                        • Active Session
                                       </span>
                                     )}
                                   </p>
@@ -602,7 +602,7 @@ export default function GroupsManagementPage() {
                             {player.skill_level} • {player.gender}
                             {(player as any).active_session && (
                               <span className="ml-1 text-blue-600 font-medium">
-                                • {(player as any).active_session.building.replace('_', ' ').toUpperCase()}
+                                • Active Session
                               </span>
                             )}
                           </p>

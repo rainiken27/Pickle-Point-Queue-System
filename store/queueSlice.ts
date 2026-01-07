@@ -1,5 +1,5 @@
 import { StateCreator } from 'zustand';
-import { QueueEntry, QueueEntryWithPlayer, BuildingType } from '@/types';
+import { QueueEntry, QueueEntryWithPlayer } from '@/types';
 import { supabase } from '@/lib/supabase/client';
 
 export interface QueueSlice {
@@ -9,10 +9,10 @@ export interface QueueSlice {
 
   // Actions
   fetchQueue: () => Promise<void>;
-  addToQueue: (entry: { player_id: string; building: BuildingType; group_id?: string }) => Promise<void>;
+  addToQueue: (entry: { player_id: string; group_id?: string }) => Promise<void>;
   removeFromQueue: (queueId: string) => Promise<void>;
   updateQueuePosition: (queueId: string, newPosition: number) => Promise<void>;
-  getQueueByBuilding: (building: BuildingType) => QueueEntryWithPlayer[];
+  updateQueuePositions: (updates: Array<{ id: string; position: number }>) => Promise<void>;
   subscribeToQueue: () => () => void;
 }
 
@@ -30,23 +30,31 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
           *,
           player:players(*)
         `)
-        .eq('status', 'waiting')
-        .order('joined_at', { ascending: true }); // First-come, first-served
+        .in('status', ['waiting', 'playing']) // Fetch both waiting and playing players
+        .order('position', { ascending: true }); // Order by position to support manual reordering
 
       if (error) throw error;
+      
+      console.log('[Queue Fetch] Fetched queue data:', data?.map(e => ({ 
+        id: e.id, 
+        player_name: e.player?.name, 
+        position: e.position, 
+        status: e.status,
+        court_id: e.court_id
+      })));
+      
       set({ queueEntries: data || [], loading: false });
     } catch (error) {
       set({ error: (error as Error).message, loading: false });
     }
   },
 
-  addToQueue: async ({ player_id, building, group_id }) => {
+  addToQueue: async ({ player_id, group_id }) => {
     try {
-      // Calculate next position for this building by checking database
+      // Calculate next position by checking database (single facility queue)
       const { data: existingQueue } = await supabase
         .from('queue')
         .select('position')
-        .eq('building', building)
         .eq('status', 'waiting')
         .order('position', { ascending: false })
         .limit(1);
@@ -55,13 +63,12 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
         ? existingQueue[0].position + 1
         : 1;
 
-      console.log(`[Queue] Adding player to ${building}, next position: ${nextPosition}`);
+      console.log(`[Queue] Adding player, next position: ${nextPosition}`);
 
       const { error } = await supabase
         .from('queue')
         .insert({
           player_id,
-          building,
           group_id: group_id || null,
           position: nextPosition,
           status: 'waiting',
@@ -105,8 +112,22 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
     }
   },
 
-  getQueueByBuilding: (building) => {
-    return get().queueEntries.filter(entry => entry.building === building);
+  updateQueuePositions: async (updates) => {
+    try {
+      // Update multiple queue positions atomically
+      for (const update of updates) {
+        const { error } = await supabase
+          .from('queue')
+          .update({ position: update.position })
+          .eq('id', update.id);
+
+        if (error) throw error;
+      }
+      await get().fetchQueue();
+    } catch (error) {
+      set({ error: (error as Error).message });
+      throw error;
+    }
   },
 
   subscribeToQueue: () => {

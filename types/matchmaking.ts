@@ -1,11 +1,9 @@
 import { Player } from './player';
 import { QueueEntryWithPlayer } from './queue';
-import { BuildingType } from './session';
 
 export interface MatchSuggestion {
   players: Player[];
   court_id: string;
-  building: BuildingType;
   priority_score: number;
   factors: MatchFactors;
 }
@@ -21,7 +19,6 @@ export interface MatchFactors {
 
 export interface MatchmakingRequest {
   court_id: string;
-  building: BuildingType;
 }
 
 export interface MatchmakingResult {

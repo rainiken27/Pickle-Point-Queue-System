@@ -6,9 +6,8 @@ import { Input, Select } from '@/components/ui/Input';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { QRScanner } from '@/components/QRScanner';
 import { useStore } from '@/store';
-import { Player, PlayerPreferences, BuildingType } from '@/types';
-import { Scan, Users, Clock, Keyboard, UserPlus, X, Check, MapPin } from 'lucide-react';
-import { assignBuildingForPlayers } from '@/lib/matchmaking/buildingAssignment';
+import { Player, PlayerPreferences } from '@/types';
+import { Scan, Users, Clock, Keyboard, UserPlus, X, Check } from 'lucide-react';
 import { getSkillLevelLabel } from '@/lib/utils/skillLevel';
 
 interface GroupMember extends Player {
@@ -93,20 +92,13 @@ export default function CashierPage() {
     gender_pref: 'random',
     match_type: 'solo',
   });
-  const [assignedBuilding, setAssignedBuilding] = useState<{ building: BuildingType; reason: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [sessionStarted, setSessionStarted] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [isRejoining, setIsRejoining] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<string>('');
 
-  const { addToQueue, queueEntries, courts } = useStore();
-  const { buildings, fetchBuildings } = useStore();
-
-  // Fetch buildings on mount
-  useEffect(() => {
-    fetchBuildings();
-  }, [fetchBuildings]);
+  const { addToQueue, queueEntries } = useStore();
 
   // Validate gender preference when group composition changes
   useEffect(() => {
@@ -257,17 +249,13 @@ export default function CashierPage() {
 
     setLoading(true);
     try {
-      // Smart building assignment (only to active buildings)
-      const assignment = assignBuildingForPlayers([player], false, queueEntries, courts, buildings);
-      setAssignedBuilding(assignment);
-
-      // Start 5-hour session (or rejoin existing session)
+      // Start 5-hour session (or rejoin existing session) with preferences
       const sessionResponse = await fetch('/api/sessions/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           player_id: player.id,
-          building: assignment.building,
+          preferences,
         }),
       });
 
@@ -284,20 +272,9 @@ export default function CashierPage() {
       setIsRejoining(rejoining);
       setTimeRemaining(timeRemainingFormatted);
 
-      // Save/update preferences
-      const { error: prefsError } = await (await import('@/lib/supabase/client')).supabase
-        .from('player_preferences')
-        .upsert({
-          player_id: player.id,
-          ...preferences,
-        });
-
-      if (prefsError) throw prefsError;
-
       // Add to queue (no group_id for solo)
       await addToQueue({
         player_id: player.id,
-        building: assignment.building,
       });
 
       if (rejoining) {
@@ -313,7 +290,6 @@ export default function CashierPage() {
         setPlayer(null);
         setSessionStarted(false);
         setSuccessMessage('');
-        setAssignedBuilding(null);
         setIsRejoining(false);
         setTimeRemaining('');
         setPreferences({
@@ -338,10 +314,6 @@ export default function CashierPage() {
 
     setLoading(true);
     try {
-      // Smart building assignment for the group (only to active buildings)
-      const assignment = assignBuildingForPlayers(groupMembers, true, queueEntries, courts, buildings);
-      setAssignedBuilding(assignment);
-
       // Generate shared group_id
       const groupId = crypto.randomUUID();
 
@@ -350,13 +322,16 @@ export default function CashierPage() {
 
       // Start sessions and add to queue for each member
       for (const member of groupMembers) {
-        // Start 5-hour session (or rejoin existing session)
+        // Start 5-hour session (or rejoin existing session) with group preferences
         const sessionResponse = await fetch('/api/sessions/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             player_id: member.id,
-            building: assignment.building,
+            preferences: {
+              ...preferences,
+              match_type: 'group', // Force group mode
+            },
           }),
         });
 
@@ -373,21 +348,9 @@ export default function CashierPage() {
           }
         }
 
-        // Save/update preferences (mark as group)
-        const { error: prefsError } = await (await import('@/lib/supabase/client')).supabase
-          .from('player_preferences')
-          .upsert({
-            player_id: member.id,
-            ...preferences,
-            match_type: 'group', // Force group mode
-          });
-
-        if (prefsError) throw prefsError;
-
         // Add to queue with shared group_id
         await addToQueue({
           player_id: member.id,
-          building: assignment.building,
           group_id: groupId,
         });
       }
@@ -408,7 +371,6 @@ export default function CashierPage() {
         setCurrentScanQr('');
         setSessionStarted(false);
         setSuccessMessage('');
-        setAssignedBuilding(null);
         setIsRejoining(false);
         setTimeRemaining('');
         setPreferences({
@@ -424,7 +386,7 @@ export default function CashierPage() {
     }
   };
 
-  if (sessionStarted && assignedBuilding) {
+  if (sessionStarted) {
     return (
       <div className="min-h-screen bg-green-50 flex items-center justify-center">
         <Card className="max-w-md">
@@ -441,17 +403,6 @@ export default function CashierPage() {
               ) : (
                 <p className="text-gray-600">5-hour session{isGroupMode ? 's' : ''} started</p>
               )}
-
-              {/* Building Assignment Info */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <div className="flex items-center justify-center gap-2 mb-2">
-                  <MapPin className="w-5 h-5 text-blue-600" />
-                  <p className="font-bold text-blue-900">
-                    Assigned to {assignedBuilding.building.replace('_', ' ').toUpperCase()}
-                  </p>
-                </div>
-                <p className="text-sm text-blue-700">{assignedBuilding.reason}</p>
-              </div>
 
               {isGroupMode && groupMembers.length > 0 && (
                 <div className="mt-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
@@ -658,18 +609,6 @@ export default function CashierPage() {
                 />
               </div>
 
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <div className="flex items-start gap-2">
-                  <MapPin className="w-4 h-4 text-blue-600 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium text-blue-900">Smart Building Assignment</p>
-                    <p className="text-xs text-blue-700 mt-1">
-                      We'll automatically assign you to the best building based on queue status and skill matching
-                    </p>
-                  </div>
-                </div>
-              </div>
-
               <Button
                 onClick={handleStartSession}
                 disabled={loading}
@@ -708,18 +647,6 @@ export default function CashierPage() {
                   onChange={(e) => setPreferences({ ...preferences, gender_pref: e.target.value as any })}
                   options={getGroupGenderPreferenceOptions(groupMembers)}
                 />
-              </div>
-
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
-                <div className="flex items-start gap-2">
-                  <MapPin className="w-4 h-4 text-blue-600 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium text-blue-900">Smart Building Assignment</p>
-                    <p className="text-xs text-blue-700 mt-1">
-                      Your group will be automatically assigned to the best building for quick matching
-                    </p>
-                  </div>
-                </div>
               </div>
 
               <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">

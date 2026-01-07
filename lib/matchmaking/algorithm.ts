@@ -1,4 +1,4 @@
-import { QueueEntryWithPlayer, MatchSuggestion, MatchFactors, BuildingType } from '@/types';
+import { QueueEntryWithPlayer, MatchSuggestion, MatchFactors } from '@/types';
 import { supabaseServer as supabase } from '@/lib/supabase/server';
 
 export class MatchmakingEngine {
@@ -9,27 +9,25 @@ export class MatchmakingEngine {
    * 3. Skill Level Preference (beginner/novice vs intermediate/advanced)
    * 4. Gender Preference
    * 5. Variety Enforcement
-   * 6. Building Assignment
    */
   async generateMatch(
     courtId: string,
-    building: BuildingType,
     queueEntries: QueueEntryWithPlayer[]
   ): Promise<MatchSuggestion | null> {
-    // Filter queue for this building and waiting status
-    const buildingQueue = queueEntries
-      .filter(entry => entry.building === building && entry.status === 'waiting')
+    // Filter queue for waiting status (single facility - no building filter)
+    const waitingQueue = queueEntries
+      .filter(entry => entry.status === 'waiting')
       .sort((a, b) => a.position - b.position);
 
-    console.log(`[ALGORITHM] ${building}: ${buildingQueue.length} players after filtering`);
+    console.log(`[ALGORITHM] ${waitingQueue.length} players in queue`);
 
-    if (buildingQueue.length < 4) {
-      console.log(`[ALGORITHM] Not enough players: ${buildingQueue.length} < 4`);
+    if (waitingQueue.length < 4) {
+      console.log(`[ALGORITHM] Not enough players: ${waitingQueue.length} < 4`);
       return null; // Need at least 4 players for a match
     }
 
     // Try to find a match with all constraints
-    let match = await this.findMatchWithConstraints(buildingQueue, courtId, building, []);
+    let match = await this.findMatchWithConstraints(waitingQueue, courtId, []);
 
     // If no match found, relax constraints progressively
     // Priority: Skill (30pts) > Gender (15pts) > Variety (10pts)
@@ -42,9 +40,8 @@ export class MatchmakingEngine {
         const relaxedConstraints = relaxationOrder.slice(0, i + 1);
         console.log(`[ALGORITHM] Trying with relaxed: [${relaxedConstraints.join(', ')}]`);
         match = await this.findMatchWithConstraints(
-          buildingQueue,
+          waitingQueue,
           courtId,
-          building,
           relaxedConstraints
         );
         if (match) {
@@ -66,17 +63,22 @@ export class MatchmakingEngine {
   private async findMatchWithConstraints(
     queue: QueueEntryWithPlayer[],
     courtId: string,
-    building: BuildingType,
     relaxedConstraints: string[]
   ): Promise<MatchSuggestion | null> {
+    console.log('[ALGORITHM] Queue state:', queue.map(e => ({
+      name: e.player?.name,
+      position: e.position,
+      group_id: e.group_id,
+      status: e.status
+    })));
+
     // Priority 1: Friend groups (never relaxed)
     const friendGroupMatch = await this.matchFriendGroup(queue);
     if (friendGroupMatch) {
-      console.log('[ALGORITHM] Found friend group match');
+      console.log('[ALGORITHM] Found friend group match:', friendGroupMatch.map(p => p.player?.name));
       return this.createMatchSuggestion(
         friendGroupMatch,
         courtId,
-        building,
         { is_friend_group: true },
         relaxedConstraints
       );
@@ -105,7 +107,6 @@ export class MatchmakingEngine {
         return this.createMatchSuggestion(
           match,
           courtId,
-          building,
           { has_time_urgent_players: true },
           relaxedConstraints
         );
@@ -113,7 +114,12 @@ export class MatchmakingEngine {
     }
 
     // Priority 3-5: Standard matching (skill, gender, variety)
-    console.log(`[ALGORITHM] Trying standard match with top ${Math.min(queue.length, 8)} players`);
+    console.log(`[ALGORITHM] No friend group or urgent players, trying standard match with top ${Math.min(queue.length, 8)} players`);
+    console.log('[ALGORITHM] Standard match candidates:', queue.slice(0, 8).map(e => ({
+      name: e.player?.name,
+      position: e.position,
+      group_id: e.group_id
+    })));
     const standardMatch = await this.matchByConstraints(
       queue.slice(0, 8), // Consider top 8 in queue
       relaxedConstraints
@@ -124,7 +130,6 @@ export class MatchmakingEngine {
       return this.createMatchSuggestion(
         standardMatch,
         courtId,
-        building,
         {},
         relaxedConstraints
       );
@@ -410,7 +415,6 @@ export class MatchmakingEngine {
   private createMatchSuggestion(
     players: QueueEntryWithPlayer[],
     courtId: string,
-    building: BuildingType,
     extraFactors: Partial<MatchFactors>,
     relaxedConstraints: string[]
   ): MatchSuggestion {
@@ -442,7 +446,6 @@ export class MatchmakingEngine {
     return {
       players: extractedPlayers,
       court_id: courtId,
-      building,
       priority_score: priorityScore,
       factors,
     };

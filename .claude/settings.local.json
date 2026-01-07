@@ -10,7 +10,9 @@
       "Bash(supabase db push:*)",
       "Bash(supabase db reset:*)",
       "Bash(npm run seed:staff:*)",
-      "Bash(npx supabase:*)"
+      "Bash(npx supabase:*)",
+      "Skill(bmad:bmm:workflows:quick-dev)",
+      "Bash(supabase stop:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

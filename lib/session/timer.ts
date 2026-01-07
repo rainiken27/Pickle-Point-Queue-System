@@ -44,3 +44,34 @@ export function hasExpired(session: ActiveSession): boolean {
   const elapsedMs = session.elapsed_minutes * 60000;
   return elapsedMs > (FIVE_HOURS_MS + GRACE_PERIOD_MS);
 }
+
+/**
+ * Format remaining time as HH:MM:SS countdown
+ * @param remainingMinutes - Remaining time in minutes
+ * @returns Formatted string like "02:34:15"
+ */
+export function formatCountdown(remainingMinutes: number): string {
+  if (remainingMinutes <= 0) return '00:00:00';
+
+  const totalSeconds = Math.max(0, remainingMinutes * 60);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = Math.floor(totalSeconds % 60);
+
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+/**
+ * Format remaining time in milliseconds as MM:SS countdown
+ * @param remainingMs - Remaining time in milliseconds
+ * @returns Formatted string like "14:32"
+ */
+export function formatCountdownMs(remainingMs: number): string {
+  if (remainingMs <= 0) return '00:00';
+
+  const totalSeconds = Math.max(0, Math.floor(remainingMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabase/server';
 import { supabase } from '@/lib/supabase/client';
-import { assignBuildingForPlayers } from '@/lib/matchmaking/buildingAssignment';
 import { Player, QueueEntryWithPlayer, Court } from '@/types';
 
 /**
@@ -131,22 +130,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Fetch current queue and courts for smart assignment
-    const { data: currentQueue } = await supabaseServer
-      .from('queue')
-      .select(`
-        *,
-        player:players(*)
-      `)
-      .eq('status', 'waiting');
-
-    const { data: courts } = await supabaseServer
-      .from('courts')
-      .select('*');
-
-    const queueEntries: QueueEntryWithPlayer[] = currentQueue || [];
-    const allCourts: Court[] = courts || [];
-
     // Separate friend groups from solo players
     const friendGroups = new Map<string, typeof eligiblePlayers>();
     const soloPlayers: typeof eligiblePlayers = [];
@@ -169,20 +152,13 @@ export async function POST(request: NextRequest) {
 
     // Process friend groups first (keep them together)
     for (const [groupId, groupPlayers] of friendGroups.entries()) {
-      const players = groupPlayers.map(p => p.player);
-      const isGroup = groupPlayers.length > 1;
-
-      // Smart building assignment (keeps group together)
-      const assignment = assignBuildingForPlayers(players, isGroup, queueEntries, allCourts);
-
       // Update queue entries for all group members
       for (const item of groupPlayers) {
         const { error: updateError } = await supabaseServer
           .from('queue')
           .update({
             status: 'waiting',
-            building: assignment.building,
-            position: await getNextPosition(assignment.building),
+            position: await getNextPosition(),
             court_id: null,
           })
           .eq('id', item.queueEntry.id);
@@ -195,19 +171,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Process solo players individually (optimal building assignment for each)
+    // Process solo players individually
     console.log(`[REJOIN] Processing ${soloPlayers.length} solo players...`);
     for (const item of soloPlayers) {
-      // Assign each solo player to their optimal building
-      const assignment = assignBuildingForPlayers([item.player], false, queueEntries, allCourts);
-      console.log(`[REJOIN] ${item.player.name} → ${assignment.building} (${assignment.reason})`);
+      console.log(`[REJOIN] ${item.player.name} rejoining queue`);
 
       const { error: updateError } = await supabaseServer
         .from('queue')
         .update({
           status: 'waiting',
-          building: assignment.building,
-          position: await getNextPosition(assignment.building),
+          position: await getNextPosition(),
           court_id: null,
         })
         .eq('id', item.queueEntry.id);
@@ -215,7 +188,7 @@ export async function POST(request: NextRequest) {
       if (updateError) {
         console.error(`[REJOIN ERROR] ${item.player.name}:`, updateError);
       } else {
-        console.log(`[REJOIN SUCCESS] ${item.player.name} rejoined at position in ${assignment.building}`);
+        console.log(`[REJOIN SUCCESS] ${item.player.name} rejoined queue`);
         rejoinedPlayers.push(item.player.name);
       }
     }
@@ -237,11 +210,10 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function getNextPosition(building: string): Promise<number> {
+async function getNextPosition(): Promise<number> {
   const { data: existingQueue } = await supabaseServer
     .from('queue')
     .select('position')
-    .eq('building', building)
     .eq('status', 'waiting')
     .order('position', { ascending: false })
     .limit(1);

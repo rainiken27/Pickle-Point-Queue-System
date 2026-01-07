@@ -1,18 +1,8 @@
-import { BuildingType } from './session';
-
 export interface CourtUtilization {
   court_number: number;
-  building: BuildingType;
   utilization_percentage: number;
   total_sessions: number;
   average_duration_minutes: number;
-}
-
-export interface BuildingLoadVariance {
-  building: BuildingType;
-  queue_depth: number;
-  utilization_percentage: number;
-  average_wait_minutes: number;
 }
 
 export interface PeakHourData {

@@ -4,10 +4,9 @@ import { useShallow } from 'zustand/react/shallow';
 import { createQueueSlice, QueueSlice } from './queueSlice';
 import { createCourtSlice, CourtSlice } from './courtSlice';
 import { createTimerSlice, TimerSlice } from './timerSlice';
-import { createBuildingSlice, BuildingSlice } from './buildingSlice';
 
 // Combined store type
-type StoreState = QueueSlice & CourtSlice & TimerSlice & BuildingSlice;
+type StoreState = QueueSlice & CourtSlice & TimerSlice;
 
 export const useStore = create<StoreState>()(
   persist(
@@ -15,7 +14,6 @@ export const useStore = create<StoreState>()(
       ...createQueueSlice(...a),
       ...createCourtSlice(...a),
       ...createTimerSlice(...a),
-      ...createBuildingSlice(...a),
     }),
     {
       name: 'pickleball-queue-storage',
@@ -41,8 +39,8 @@ export const useQueue = () => useStore(useShallow((state) => ({
   fetchQueue: state.fetchQueue,
   addToQueue: state.addToQueue,
   removeFromQueue: state.removeFromQueue,
-  getQueueByBuilding: state.getQueueByBuilding,
   subscribeToQueue: state.subscribeToQueue,
+  updateQueuePositions: state.updateQueuePositions,
 })));
 
 export const useCourts = () => useStore(useShallow((state) => ({
@@ -66,11 +64,4 @@ export const useTimers = () => useStore(useShallow((state) => ({
   isUrgent: state.isUrgent,
 })));
 
-export const useBuildings = () => useStore(useShallow((state) => ({
-  buildings: state.buildings,
-  loading: state.loading,
-  error: state.error,
-  fetchBuildings: state.fetchBuildings,
-  toggleBuildingStatus: state.toggleBuildingStatus,
-  subscribeToBuildings: state.subscribeToBuildings,
-})));
+// Buildings slice removed - single facility with 6 courts

@@ -1,14 +1,29 @@
-import { BuildingType } from './session';
-
 export type CourtStatus = 'available' | 'occupied' | 'reserved';
 
 export interface Court {
   id: string;
   court_number: number;
-  building: BuildingType;
   status: CourtStatus;
-  current_session_id: string | null;
-  session_start_time: string | null;
+  court_timer_started_at: string | null;
+  current_session_id?: string | null;
+  session_start_time?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ActiveCourt extends Court {
+  court_timer_remaining_minutes: number | null;
+  court_timer_elapsed_minutes: number | null;
+  is_timer_warning: boolean; // true if < 5 min remaining
+  is_timer_alert: boolean; // true if < 1 min remaining
+}
+
+export interface CourtWithPlayers extends Court {
+  players: Array<{
+    id: string;
+    name: string;
+    photo_url: string | null;
+  }>;
 }
 
 export interface CourtWithSession extends Court {
