@@ -7,6 +7,12 @@ export interface Court {
   court_timer_started_at: string | null;
   current_session_id?: string | null;
   session_start_time?: string | null;
+  current_players?: Array<{
+    id: string;
+    name: string;
+    skill_level: number;
+    photo_url: string | null;
+  }> | null;
   created_at?: string;
   updated_at?: string;
 }

@@ -3,214 +3,354 @@ import { supabaseServer as supabase } from '@/lib/supabase/server';
 
 export class MatchmakingEngine {
   /**
-   * Generate a match suggestion for a specific court following priority hierarchy:
-   * 1. Friend Groups (highest)
-   * 2. Time Urgency
-   * 3. Skill Level Preference (beginner/novice vs intermediate/advanced)
-   * 4. Gender Preference
-   * 5. Variety Enforcement
+   * Generate match suggestions for all available courts:
+   * 1. Time Urgency (players with <15 min remaining get priority)
+   * 2. Solo Protection with Group Efficiency:
+   *    - Groups NEVER get broken up (absolute rule)
+   *    - Groups can play early IF there are enough courts to guarantee solo players won't be delayed
+   *    - Strict queue order when court availability is limited, but respecting group integrity
+   * 3. Group-Aware Queue Processing (never break groups)
+   * 
+   * Skill level and gender preferences are ignored - display only.
+   */
+  async generateMatches(
+    availableCourts: string[],
+    queueEntries: QueueEntryWithPlayer[]
+  ): Promise<MatchSuggestion[]> {
+    const matches: MatchSuggestion[] = [];
+    let remainingQueue = [...queueEntries]
+      .filter(entry => entry.status === 'waiting')
+      .sort((a, b) => a.position - b.position);
+
+    console.log(`[ALGORITHM] ${remainingQueue.length} players in queue, ${availableCourts.length} courts available`);
+
+    for (const courtId of availableCourts) {
+      if (remainingQueue.length < 4) {
+        console.log(`[ALGORITHM] Not enough players remaining: ${remainingQueue.length} < 4`);
+        break;
+      }
+
+      const match = await this.generateSingleMatch(courtId, remainingQueue, availableCourts.length - matches.length);
+      if (match) {
+        matches.push(match);
+        // Remove matched players from remaining queue
+        const matchedPlayerIds = match.players.map(p => p.id);
+        remainingQueue = remainingQueue.filter(entry => !matchedPlayerIds.includes(entry.player_id));
+      }
+    }
+
+    return matches;
+  }
+
+  /**
+   * Generate a match suggestion for a specific court with remaining court availability context
+   */
+  private async generateSingleMatch(
+    courtId: string,
+    queueEntries: QueueEntryWithPlayer[],
+    remainingCourts: number
+  ): Promise<MatchSuggestion | null> {
+    console.log(`[ALGORITHM] ${queueEntries.length} players in queue for court ${courtId}, ${remainingCourts} courts remaining`);
+
+    if (queueEntries.length < 4) {
+      console.log(`[ALGORITHM] Not enough players: ${queueEntries.length} < 4`);
+      return null;
+    }
+
+    // Priority 1: Time urgency (players with <30 min remaining)
+    const urgentPlayers = await this.getUrgentPlayers(queueEntries);
+    if (urgentPlayers.length > 0) {
+      console.log(`[ALGORITHM] Found ${urgentPlayers.length} urgent players`);
+      
+      // Mix urgent players with non-urgent to form a match
+      const urgentPlayerIds = urgentPlayers.map(p => p.player_id);
+      const nonUrgentPlayers = queueEntries.filter(e => !urgentPlayerIds.includes(e.player_id));
+      
+      // Prioritize urgent players, then fill with earliest non-urgent
+      const prioritizedPlayers = [...urgentPlayers, ...nonUrgentPlayers];
+      const urgentMatch = prioritizedPlayers.slice(0, 4);
+      
+      console.log('[ALGORITHM] Using urgent priority match:', urgentMatch.map(p => p.player?.name));
+      return this.createMatchSuggestion(
+        urgentMatch,
+        courtId,
+        { has_time_urgent_players: true }
+      );
+    }
+
+    // Priority 2: Solo Protection with Group Efficiency
+    const groupOptimizedMatch = this.findGroupOptimizedMatch(queueEntries, remainingCourts);
+    if (groupOptimizedMatch) {
+      console.log('[ALGORITHM] Using group-optimized match:', groupOptimizedMatch.map(p => p.player?.name));
+      return this.createMatchSuggestion(
+        groupOptimizedMatch,
+        courtId,
+        { is_friend_group: this.hasCompleteGroup(groupOptimizedMatch) }
+      );
+    }
+
+    // Priority 3: Group-aware queue processing (never break groups)
+    const groupAwareMatch = this.findGroupAwareMatch(queueEntries);
+    if (groupAwareMatch) {
+      console.log('[ALGORITHM] Using group-aware match:', groupAwareMatch.map(p => p.player?.name));
+      return this.createMatchSuggestion(
+        groupAwareMatch,
+        courtId,
+        { is_friend_group: this.hasCompleteGroup(groupAwareMatch) }
+      );
+    }
+
+    // If we can't form any match without breaking groups, return null
+    console.log('[ALGORITHM] Cannot form match without breaking groups');
+    return null;
+  }
+
+  /**
+   * Find the optimal match considering group efficiency and solo protection
+   */
+  private findGroupOptimizedMatch(
+    queueEntries: QueueEntryWithPlayer[],
+    remainingCourts: number
+  ): QueueEntryWithPlayer[] | null {
+    // Analyze queue structure
+    const queueAnalysis = this.analyzeQueue(queueEntries);
+    
+    // Check if we can allow groups to play early without delaying solo players
+    for (const group of queueAnalysis.groups) {
+      if (this.canGroupPlayEarly(group, queueAnalysis.solos, remainingCourts)) {
+        // Find the best match that includes this group
+        const match = this.buildMatchWithGroup(group, queueEntries);
+        if (match && match.length === 4) {
+          return match;
+        }
+      }
+    }
+
+    // No group optimization possible, use group-aware matching
+    return null;
+  }
+
+  /**
+   * Analyze the queue to identify groups and solo players
+   */
+  private analyzeQueue(queueEntries: QueueEntryWithPlayer[]) {
+    const groups: { groupId: string; members: QueueEntryWithPlayer[]; startPosition: number }[] = [];
+    const solos: QueueEntryWithPlayer[] = [];
+    const groupMap = new Map<string, QueueEntryWithPlayer[]>();
+
+    // Group players by group_id
+    for (const entry of queueEntries) {
+      if (entry.group_id) {
+        if (!groupMap.has(entry.group_id)) {
+          groupMap.set(entry.group_id, []);
+        }
+        groupMap.get(entry.group_id)!.push(entry);
+      } else {
+        solos.push(entry);
+      }
+    }
+
+    // Convert to group analysis format
+    for (const [groupId, members] of groupMap) {
+      const sortedMembers = members.sort((a, b) => a.position - b.position);
+      groups.push({
+        groupId,
+        members: sortedMembers,
+        startPosition: sortedMembers[0].position
+      });
+    }
+
+    // Sort groups by start position
+    groups.sort((a, b) => a.startPosition - b.startPosition);
+
+    return { groups, solos };
+  }
+
+  /**
+   * Check if a group can play early without delaying solo players
+   */
+  private canGroupPlayEarly(
+    group: { groupId: string; members: QueueEntryWithPlayer[]; startPosition: number },
+    allSolos: QueueEntryWithPlayer[],
+    remainingCourts: number
+  ): boolean {
+    // Find solo players ahead of this group
+    const solosAhead = allSolos.filter(solo => solo.position < group.startPosition);
+    
+    // Calculate courts needed for solos ahead
+    const courtsNeededForSolos = Math.ceil(solosAhead.length / 4);
+    
+    // Courts available after this group takes one
+    const courtsAfterGroup = remainingCourts - 1;
+    
+    // Group can play if there are enough courts left for the solos
+    const canPlay = courtsAfterGroup >= courtsNeededForSolos;
+    
+    console.log(`[ALGORITHM] Group at position ${group.startPosition}: ${solosAhead.length} solos ahead, need ${courtsNeededForSolos} courts, ${courtsAfterGroup} courts after group, can play: ${canPlay}`);
+    
+    return canPlay;
+  }
+
+  /**
+   * Build a match that includes the specified group
+   */
+  private buildMatchWithGroup(
+    group: { groupId: string; members: QueueEntryWithPlayer[]; startPosition: number },
+    queueEntries: QueueEntryWithPlayer[]
+  ): QueueEntryWithPlayer[] {
+    const match = [...group.members];
+
+    // If this is a complete group of 4, they play together ONLY - don't mix with others
+    if (match.length === 4) {
+      console.log(`[ALGORITHM] Complete group of 4 (${group.groupId}), playing exclusively together`);
+      return match;
+    }
+
+    // If group is less than 4, fill with next available players
+    if (match.length < 4) {
+      const groupPlayerIds = group.members.map(m => m.player_id);
+      const availablePlayers = queueEntries
+        .filter(entry => !groupPlayerIds.includes(entry.player_id))
+        .sort((a, b) => a.position - b.position);
+
+      const playersNeeded = 4 - match.length;
+      match.push(...availablePlayers.slice(0, playersNeeded));
+    }
+
+    return match.slice(0, 4);
+  }
+
+  /**
+   * Find a match that respects group integrity (never breaks groups)
+   * This should only be used when no group optimization is possible
+   */
+  private findGroupAwareMatch(queueEntries: QueueEntryWithPlayer[]): QueueEntryWithPlayer[] | null {
+    // Build a list of "matchable units" (complete groups or individual solos)
+    const matchableUnits = this.buildMatchableUnits(queueEntries);
+    
+    // Only try to form a match starting from position #1 to maintain queue fairness
+    // This ensures we don't skip ahead unless it's through the group optimization logic
+    const firstUnit = matchableUnits[0];
+    if (!firstUnit) return null;
+    
+    // Try to form a match starting with the first unit in queue
+    return this.combineUnitsToMatchFromFirst(matchableUnits);
+  }
+
+  /**
+   * Build matchable units (groups that must stay together + individual solos)
+   */
+  private buildMatchableUnits(queueEntries: QueueEntryWithPlayer[]) {
+    const units: { players: QueueEntryWithPlayer[]; startPosition: number; isGroup: boolean }[] = [];
+    const processedPlayerIds = new Set<string>();
+    
+    // Sort by position to process in queue order
+    const sortedEntries = [...queueEntries].sort((a, b) => a.position - b.position);
+    
+    for (const entry of sortedEntries) {
+      if (processedPlayerIds.has(entry.player_id)) continue;
+      
+      if (entry.group_id) {
+        // Find all members of this group
+        const groupMembers = queueEntries
+          .filter(e => e.group_id === entry.group_id)
+          .sort((a, b) => a.position - b.position);
+        
+        units.push({
+          players: groupMembers,
+          startPosition: groupMembers[0].position,
+          isGroup: true
+        });
+        
+        // Mark all group members as processed
+        groupMembers.forEach(member => processedPlayerIds.add(member.player_id));
+      } else {
+        // Solo player
+        units.push({
+          players: [entry],
+          startPosition: entry.position,
+          isGroup: false
+        });
+        
+        processedPlayerIds.add(entry.player_id);
+      }
+    }
+    
+    // Sort units by their start position
+    return units.sort((a, b) => a.startPosition - b.startPosition);
+  }
+
+  /**
+   * Combine matchable units to form exactly 4 players starting from the first unit
+   */
+  private combineUnitsToMatchFromFirst(units: { players: QueueEntryWithPlayer[]; startPosition: number; isGroup: boolean }[]): QueueEntryWithPlayer[] | null {
+    // Only try starting from the first unit to maintain queue order
+    return this.findValidCombination(units, 0);
+  }
+
+  /**
+   * Find a valid combination of units starting from a given index
+   */
+  private findValidCombination(
+    units: { players: QueueEntryWithPlayer[]; startPosition: number; isGroup: boolean }[],
+    startIndex: number
+  ): QueueEntryWithPlayer[] | null {
+    const result: QueueEntryWithPlayer[] = [];
+
+    for (let i = startIndex; i < units.length && result.length < 4; i++) {
+      const unit = units[i];
+
+      // IMPORTANT: If this is a complete group of 4, they should ONLY play together
+      // Don't mix them with any other players (solos or other groups)
+      if (unit.isGroup && unit.players.length === 4) {
+        // Only return this group if we haven't started building a match yet
+        if (result.length === 0) {
+          console.log(`[ALGORITHM] Complete group of 4 found, playing together exclusively`);
+          return unit.players;
+        } else {
+          // We've already added some players, skip this complete group
+          console.log(`[ALGORITHM] Skipping complete group of 4 (already have ${result.length} players)`);
+          continue;
+        }
+      }
+
+      // Check if this unit can fit in the remaining slots
+      if (result.length + unit.players.length <= 4) {
+        result.push(...unit.players);
+
+        // If we have exactly 4 players, we found a valid match
+        if (result.length === 4) {
+          return result;
+        }
+      } else {
+        // This unit would exceed 4 players, skip it
+        // But if we don't have enough players yet, we can't form a match
+        break;
+      }
+    }
+
+    // If we don't have exactly 4 players, this combination doesn't work
+    return null;
+  }
+
+  /**
+   * Check if the match contains a complete group (all 4 players from same group)
+   */
+  private hasCompleteGroup(players: QueueEntryWithPlayer[]): boolean {
+    if (players.length !== 4) return false;
+    
+    const groupId = players[0].group_id;
+    return groupId !== null && players.every(p => p.group_id === groupId);
+  }
+
+  /**
+   * Generate a match suggestion for a specific court (legacy method for backward compatibility)
    */
   async generateMatch(
     courtId: string,
     queueEntries: QueueEntryWithPlayer[]
   ): Promise<MatchSuggestion | null> {
-    // Filter queue for waiting status (single facility - no building filter)
-    const waitingQueue = queueEntries
-      .filter(entry => entry.status === 'waiting')
-      .sort((a, b) => a.position - b.position);
-
-    console.log(`[ALGORITHM] ${waitingQueue.length} players in queue`);
-
-    if (waitingQueue.length < 4) {
-      console.log(`[ALGORITHM] Not enough players: ${waitingQueue.length} < 4`);
-      return null; // Need at least 4 players for a match
-    }
-
-    // Try to find a match with all constraints
-    let match = await this.findMatchWithConstraints(waitingQueue, courtId, []);
-
-    // If no match found, relax constraints progressively
-    // Priority: Skill (30pts) > Gender (15pts) > Variety (10pts)
-    // Relax lowest priority first: variety → gender → skill (as last resort)
-    if (!match) {
-      console.log('[ALGORITHM] No match with full constraints, relaxing...');
-      const relaxationOrder = ['variety', 'gender', 'skill'];
-      for (let i = 0; i < relaxationOrder.length; i++) {
-        // Accumulate relaxed constraints progressively
-        const relaxedConstraints = relaxationOrder.slice(0, i + 1);
-        console.log(`[ALGORITHM] Trying with relaxed: [${relaxedConstraints.join(', ')}]`);
-        match = await this.findMatchWithConstraints(
-          waitingQueue,
-          courtId,
-          relaxedConstraints
-        );
-        if (match) {
-          console.log(`[ALGORITHM] Match found after relaxing: ${relaxedConstraints.join(', ')}`);
-          break;
-        }
-      }
-    } else {
-      console.log('[ALGORITHM] Match found with full constraints');
-    }
-
-    if (!match) {
-      console.log('[ALGORITHM] No match found even after relaxing all constraints');
-    }
-
-    return match;
-  }
-
-  private async findMatchWithConstraints(
-    queue: QueueEntryWithPlayer[],
-    courtId: string,
-    relaxedConstraints: string[]
-  ): Promise<MatchSuggestion | null> {
-    console.log('[ALGORITHM] Queue state:', queue.map(e => ({
-      name: e.player?.name,
-      position: e.position,
-      group_id: e.group_id,
-      status: e.status
-    })));
-
-    // Priority 1: Friend groups (never relaxed)
-    const friendGroupMatch = await this.matchFriendGroup(queue);
-    if (friendGroupMatch) {
-      console.log('[ALGORITHM] Found friend group match:', friendGroupMatch.map(p => p.player?.name));
-      return this.createMatchSuggestion(
-        friendGroupMatch,
-        courtId,
-        { is_friend_group: true },
-        relaxedConstraints
-      );
-    }
-
-    // Priority 2: Time urgency
-    const urgentPlayers = await this.getUrgentPlayers(queue);
-    console.log(`[ALGORITHM] Urgent players: ${urgentPlayers.length}`);
-    if (urgentPlayers.length > 0) {
-      // Mix urgent players with non-urgent players to form matches
-      // Urgent players get priority but we need 4 total players
-      const urgentPlayerIds = urgentPlayers.map(p => p.player_id);
-      const nonUrgentPlayers = queue.filter(e => !urgentPlayerIds.includes(e.player_id));
-      
-      // Create a prioritized list: urgent players first, then non-urgent by queue position
-      const prioritizedPlayers = [...urgentPlayers, ...nonUrgentPlayers];
-      
-      // Try to match from this prioritized list (consider up to 8 players for combinations)
-      const match = await this.matchByConstraints(
-        prioritizedPlayers.slice(0, Math.min(8, prioritizedPlayers.length)),
-        relaxedConstraints
-      );
-      
-      if (match) {
-        console.log('[ALGORITHM] Found time-urgent priority match');
-        return this.createMatchSuggestion(
-          match,
-          courtId,
-          { has_time_urgent_players: true },
-          relaxedConstraints
-        );
-      }
-    }
-
-    // Priority 3-5: Standard matching (skill, gender, variety)
-    console.log(`[ALGORITHM] No friend group or urgent players, trying standard match with top ${Math.min(queue.length, 8)} players`);
-    console.log('[ALGORITHM] Standard match candidates:', queue.slice(0, 8).map(e => ({
-      name: e.player?.name,
-      position: e.position,
-      group_id: e.group_id
-    })));
-    const standardMatch = await this.matchByConstraints(
-      queue.slice(0, 8), // Consider top 8 in queue
-      relaxedConstraints
-    );
-
-    if (standardMatch) {
-      console.log('[ALGORITHM] Found standard match');
-      return this.createMatchSuggestion(
-        standardMatch,
-        courtId,
-        {},
-        relaxedConstraints
-      );
-    }
-
-    console.log('[ALGORITHM] No match in findMatchWithConstraints');
-    return null;
-  }
-
-  private async matchFriendGroup(queue: QueueEntryWithPlayer[]): Promise<QueueEntryWithPlayer[] | null> {
-    console.log('[FRIEND_GROUP] Checking for friend groups...');
-    console.log('[FRIEND_GROUP] Queue entries:', queue.map(e => ({ 
-      name: e.player?.name, 
-      group_id: e.group_id, 
-      position: e.position 
-    })));
-
-    // Find groups of 4
-    const groupsOf4 = this.findCompleteGroups(queue, 4);
-    console.log('[FRIEND_GROUP] Groups of 4 found:', groupsOf4.length);
-    if (groupsOf4.length > 0) {
-      console.log('[FRIEND_GROUP] Returning group of 4:', groupsOf4[0].map(e => e.player?.name));
-      return groupsOf4[0];
-    }
-
-    // Find groups of 3 + 1 solo
-    const groupsOf3 = this.findCompleteGroups(queue, 3);
-    console.log('[FRIEND_GROUP] Groups of 3 found:', groupsOf3.length);
-    if (groupsOf3.length > 0) {
-      const soloPlayers = queue.filter(e => !e.group_id);
-      console.log('[FRIEND_GROUP] Solo players available:', soloPlayers.length);
-      if (soloPlayers.length > 0) {
-        console.log('[FRIEND_GROUP] Returning group of 3 + 1 solo');
-        return [...groupsOf3[0], soloPlayers[0]];
-      }
-    }
-
-    // Find groups of 2 + 2
-    const groupsOf2 = this.findCompleteGroups(queue, 2);
-    console.log('[FRIEND_GROUP] Groups of 2 found:', groupsOf2.length);
-    if (groupsOf2.length >= 2) {
-      console.log('[FRIEND_GROUP] Returning two groups of 2');
-      return [...groupsOf2[0], ...groupsOf2[1]];
-    }
-
-    // Find group of 2 + 2 solo
-    if (groupsOf2.length > 0) {
-      const soloPlayers = queue.filter(e => !e.group_id);
-      if (soloPlayers.length >= 2) {
-        console.log('[FRIEND_GROUP] Returning group of 2 + 2 solos');
-        return [...groupsOf2[0], ...soloPlayers.slice(0, 2)];
-      }
-    }
-
-    console.log('[FRIEND_GROUP] No friend group matches found');
-    return null;
-  }
-
-  private findCompleteGroups(queue: QueueEntryWithPlayer[], size: number): QueueEntryWithPlayer[][] {
-    const groups: Map<string, QueueEntryWithPlayer[]> = new Map();
-
-    console.log(`[FIND_GROUPS] Looking for groups of size ${size}`);
-    queue.forEach(entry => {
-      if (entry.group_id) {
-        console.log(`[FIND_GROUPS] Player ${entry.player?.name} has group_id: ${entry.group_id}`);
-        if (!groups.has(entry.group_id)) {
-          groups.set(entry.group_id, []);
-        }
-        groups.get(entry.group_id)!.push(entry);
-      } else {
-        console.log(`[FIND_GROUPS] Player ${entry.player?.name} has no group_id (solo)`);
-      }
-    });
-
-    const completeGroups = Array.from(groups.values()).filter(g => g.length === size);
-    console.log(`[FIND_GROUPS] Found ${completeGroups.length} complete groups of size ${size}`);
-    completeGroups.forEach((group, index) => {
-      console.log(`[FIND_GROUPS] Group ${index + 1}:`, group.map(e => e.player?.name));
-    });
-
-    return completeGroups;
+    return this.generateSingleMatch(courtId, queueEntries, 1);
   }
 
   private async getUrgentPlayers(queue: QueueEntryWithPlayer[]): Promise<QueueEntryWithPlayer[]> {
@@ -227,7 +367,7 @@ export class MatchmakingEngine {
       .filter(session => {
         const elapsed = Date.now() - new Date(session.start_time).getTime();
         const remaining = 300 * 60 * 1000 - elapsed; // 5 hours in ms
-        return remaining < 30 * 60 * 1000; // < 30 minutes
+        return remaining < 15 * 60 * 1000; // < 15 minutes
       })
       .map(s => s.player_id);
 
@@ -242,198 +382,24 @@ export class MatchmakingEngine {
       });
   }
 
-  private async matchByConstraints(
-    players: QueueEntryWithPlayer[],
-    relaxedConstraints: string[]
-  ): Promise<QueueEntryWithPlayer[] | null> {
-    console.log(`[ALGORITHM] matchByConstraints: ${players.length} players, relaxed: [${relaxedConstraints.join(', ')}]`);
-
-    // Try all combinations of 4 players
-    let attemptCount = 0;
-    for (let i = 0; i < players.length - 3; i++) {
-      for (let j = i + 1; j < players.length - 2; j++) {
-        for (let k = j + 1; k < players.length - 1; k++) {
-          for (let l = k + 1; l < players.length; l++) {
-            attemptCount++;
-            const match = [players[i], players[j], players[k], players[l]];
-
-            const isValid = await this.validateMatch(match, relaxedConstraints);
-            if (isValid) {
-              console.log(`[ALGORITHM] Found valid match after ${attemptCount} attempts`);
-              return match;
-            }
-          }
-        }
-      }
-    }
-
-    console.log(`[ALGORITHM] No valid match after ${attemptCount} attempts`);
-    return null;
-  }
-
-  private async validateMatch(
-    players: QueueEntryWithPlayer[],
-    relaxedConstraints: string[]
-  ): Promise<boolean> {
-    const playerNames = players.map(p => p.player?.name || 'unknown').join(', ');
-
-    // Skill level PREFERENCE check (highest priority after groups/urgency)
-    if (!relaxedConstraints.includes('skill')) {
-      const isSkillCompatible = await this.checkSkillLevelPreferenceCompatibility(players);
-      if (!isSkillCompatible) {
-        console.log(`[VALIDATE] FAILED skill check: ${playerNames}`);
-        return false;
-      }
-    }
-
-    // Gender preference check (second priority)
-    if (!relaxedConstraints.includes('gender')) {
-      const isGenderCompatible = await this.checkGenderCompatibility(players);
-      if (!isGenderCompatible) {
-        console.log(`[VALIDATE] FAILED gender check: ${playerNames}`);
-        return false;
-      }
-    }
-
-    // Variety enforcement (lowest priority)
-    if (!relaxedConstraints.includes('variety')) {
-      const isVarietyCompliant = await this.checkVarietyCompliance(players);
-      if (!isVarietyCompliant) {
-        console.log(`[VALIDATE] FAILED variety check: ${playerNames}`);
-        return false;
-      }
-    }
-
-    console.log(`[VALIDATE] PASSED all checks: ${playerNames}`);
-    return true;
-  }
-
-  private async checkSkillLevelPreferenceCompatibility(players: QueueEntryWithPlayer[]): Promise<boolean> {
-    // Fetch preferences for all players
-    const { data: prefs } = await supabase
-      .from('player_preferences')
-      .select('player_id, skill_level_pref')
-      .in('player_id', players.map(p => p.player_id));
-
-    if (!prefs || prefs.length === 0) return true;
-
-    // Map each player to their skill level group (beginner/novice -> 'beginner', intermediate/advanced -> 'intermediate_advanced')
-    const playerSkillGroups = players.map(p => {
-      const skillLevel = p.player.skill_level;
-      if (skillLevel === 'beginner' || skillLevel === 'novice') {
-        return 'beginner';
-      }
-      return 'intermediate_advanced';
-    });
-
-    // Check if all players' preferences are compatible with the actual skill composition
-    for (const pref of prefs) {
-      const playerIndex = players.findIndex(p => p.player_id === pref.player_id);
-      if (playerIndex === -1) continue;
-
-      const wantedSkillGroup = pref.skill_level_pref;
-
-      // Check if this player's preference matches the group composition
-      // For beginner preference: all players should be beginner/novice
-      // For intermediate_advanced preference: all players should be intermediate/advanced
-      const allPlayersMatchPreference = playerSkillGroups.every(group => group === wantedSkillGroup);
-
-      if (!allPlayersMatchPreference) return false;
-    }
-
-    return true;
-  }
-
-  private async checkGenderCompatibility(players: QueueEntryWithPlayer[]): Promise<boolean> {
-    // Fetch preferences for all players
-    const { data: prefs } = await supabase
-      .from('player_preferences')
-      .select('player_id, gender_pref')
-      .in('player_id', players.map(p => p.player_id));
-
-    if (!prefs || prefs.length === 0) {
-      console.log('[GENDER] No preferences found, allowing match');
-      return true;
-    }
-
-    const genders = players.map(p => p.player.gender);
-    const maleCount = genders.filter(g => g === 'male').length;
-    const femaleCount = genders.filter(g => g === 'female').length;
-
-    console.log(`[GENDER] Checking: ${players.map(p => `${p.player.name}(${p.player.gender})`).join(', ')}`);
-    console.log(`[GENDER] Counts: ${maleCount}M / ${femaleCount}F`);
-    console.log(`[GENDER] Preferences: ${prefs.map(p => p.gender_pref).join(', ')}`);
-
-    for (const pref of prefs) {
-      if (pref.gender_pref === 'mens' && femaleCount > 0) {
-        console.log(`[GENDER] REJECT: Player wants mens match but has ${femaleCount} females`);
-        return false;
-      }
-      if (pref.gender_pref === 'womens' && maleCount > 0) {
-        console.log(`[GENDER] REJECT: Player wants womens match but has ${maleCount} males`);
-        return false;
-      }
-      if (pref.gender_pref === 'mixed' && (maleCount === 0 || femaleCount === 0)) {
-        console.log(`[GENDER] REJECT: Player wants mixed but composition is all same gender`);
-        return false;
-      }
-    }
-
-    console.log('[GENDER] PASS: All gender preferences satisfied');
-    return true;
-  }
-
-  private async checkVarietyCompliance(players: QueueEntryWithPlayer[]): Promise<boolean> {
-    // Check if any players have played together in last 3 sessions
-    console.log(`[VARIETY] Checking: ${players.map(p => p.player.name).join(', ')}`);
-
-    for (const player of players) {
-      const { data: recentOpponents } = await supabase
-        .rpc('get_recent_opponents', {
-          p_player_id: player.player_id,
-          p_limit: 3,
-        });
-
-      if (recentOpponents && recentOpponents.length > 0) {
-        console.log(`[VARIETY] ${player.player.name} recent opponents: ${recentOpponents.length}`);
-        const otherPlayerIds = players
-          .filter(p => p.player_id !== player.player_id)
-          .map(p => p.player_id);
-
-        const hasRecentOpponent = otherPlayerIds.some(id => recentOpponents.includes(id));
-        if (hasRecentOpponent) {
-          console.log(`[VARIETY] REJECT: ${player.player.name} played with someone in this group recently`);
-          return false;
-        }
-      }
-    }
-
-    console.log('[VARIETY] PASS: No recent opponents in this group');
-    return true;
-  }
-
   private createMatchSuggestion(
     players: QueueEntryWithPlayer[],
     courtId: string,
-    extraFactors: Partial<MatchFactors>,
-    relaxedConstraints: string[]
+    extraFactors: Partial<MatchFactors>
   ): MatchSuggestion {
     const factors: MatchFactors = {
       is_friend_group: extraFactors.is_friend_group || false,
       has_time_urgent_players: extraFactors.has_time_urgent_players || false,
-      skill_compatible: !relaxedConstraints.includes('skill'),
-      gender_compatible: !relaxedConstraints.includes('gender'),
-      variety_compliant: !relaxedConstraints.includes('variety'),
-      relaxed_constraints: relaxedConstraints,
+      skill_compatible: true, // Always true since we ignore skill matching
+      gender_compatible: true, // Always true since we ignore gender matching
+      variety_compliant: true, // Always true since we ignore variety enforcement
+      relaxed_constraints: [], // No constraints to relax
     };
 
-    // Calculate priority score (reflects hierarchy)
-    let priorityScore = 0;
-    if (factors.is_friend_group) priorityScore += 100;          // Highest priority
-    if (factors.has_time_urgent_players) priorityScore += 50;   // Second priority
-    if (factors.skill_compatible) priorityScore += 30;          // Third priority (skill preference)
-    if (factors.gender_compatible) priorityScore += 15;         // Fourth priority
-    if (factors.variety_compliant) priorityScore += 10;         // Fifth priority
+    // Priority score: urgent > friend groups at front > regular queue order
+    let priorityScore = 50; // Base score
+    if (factors.has_time_urgent_players) priorityScore += 100; // Highest priority
+    if (factors.is_friend_group) priorityScore += 25; // Bonus for groups at front
 
     // Extract player objects and validate
     const extractedPlayers = players.map(p => p.player).filter(p => p && p.id);

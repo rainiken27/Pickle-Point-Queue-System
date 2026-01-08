@@ -10,7 +10,7 @@ export interface CourtSlice {
   // Actions
   fetchCourts: () => Promise<void>;
   updateCourtStatus: (courtId: string, status: 'available' | 'occupied') => Promise<void>;
-  assignSession: (courtId: string) => Promise<void>;
+  assignSession: (courtId: string, players?: Array<{id: string, name: string, skill_level: number, photo_url: string | null}>) => Promise<void>;
   completeSession: (courtId: string) => Promise<void>;
   subscribeToCourts: () => () => void;
 }
@@ -50,14 +50,21 @@ export const createCourtSlice: StateCreator<CourtSlice> = (set, get) => ({
     }
   },
 
-  assignSession: async (courtId) => {
+  assignSession: async (courtId, players) => {
     try {
+      const updateData: any = {
+        status: 'occupied',
+        court_timer_started_at: new Date().toISOString(),
+      };
+
+      // Store player data if provided
+      if (players && players.length > 0) {
+        updateData.current_players = players;
+      }
+
       const { error } = await supabase
         .from('courts')
-        .update({
-          status: 'occupied',
-          court_timer_started_at: new Date().toISOString(),
-        })
+        .update(updateData)
         .eq('id', courtId);
 
       if (error) throw error;
@@ -75,6 +82,7 @@ export const createCourtSlice: StateCreator<CourtSlice> = (set, get) => ({
         .update({
           status: 'available',
           court_timer_started_at: null,
+          current_players: null, // Clear player data when match ends
         })
         .eq('id', courtId);
 

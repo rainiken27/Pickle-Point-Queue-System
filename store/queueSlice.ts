@@ -24,26 +24,53 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
   fetchQueue: async () => {
     set({ loading: true, error: null });
     try {
-      const { data, error } = await supabase
+      // First, fetch queue entries with player and group data
+      const { data: queueData, error: queueError } = await supabase
         .from('queue')
         .select(`
           *,
-          player:players(*)
+          player:players(*),
+          group:groups(id, name)
         `)
         .in('status', ['waiting', 'playing']) // Fetch both waiting and playing players
         .order('position', { ascending: true }); // Order by position to support manual reordering
 
-      if (error) throw error;
-      
-      console.log('[Queue Fetch] Fetched queue data:', data?.map(e => ({ 
-        id: e.id, 
-        player_name: e.player?.name, 
-        position: e.position, 
-        status: e.status,
-        court_id: e.court_id
-      })));
-      
-      set({ queueEntries: data || [], loading: false });
+      if (queueError) throw queueError;
+
+      // Then fetch sessions separately for those players
+      if (queueData && queueData.length > 0) {
+        const playerIds = queueData.map(q => q.player_id);
+        const { data: sessionsData } = await supabase
+          .from('sessions')
+          .select('player_id, display_photo')
+          .in('player_id', playerIds)
+          .eq('status', 'active');
+
+        // Create a map of player_id to session
+        const sessionMap = new Map();
+        if (sessionsData) {
+          sessionsData.forEach(s => sessionMap.set(s.player_id, s));
+        }
+
+        // Manually attach session data to queue entries
+        const enrichedData = queueData.map(q => ({
+          ...q,
+          session: sessionMap.get(q.player_id) || null
+        }));
+
+        console.log('[Queue Fetch] Fetched queue data:', enrichedData.map(e => ({
+          id: e.id,
+          player_name: e.player?.name,
+          position: e.position,
+          status: e.status,
+          court_id: e.court_id,
+          display_photo: (e as any).session?.display_photo
+        })));
+
+        set({ queueEntries: enrichedData, loading: false });
+      } else {
+        set({ queueEntries: [], loading: false });
+      }
     } catch (error) {
       set({ error: (error as Error).message, loading: false });
     }
@@ -51,6 +78,21 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
 
   addToQueue: async ({ player_id, group_id }) => {
     try {
+      // If no group_id provided, check if player is member of a permanent group
+      let finalGroupId = group_id;
+      if (!finalGroupId) {
+        const { data: groupMembership } = await supabase
+          .from('group_members')
+          .select('group_id')
+          .eq('player_id', player_id)
+          .single();
+
+        if (groupMembership) {
+          finalGroupId = groupMembership.group_id;
+          console.log(`[Queue] Player is member of group ${finalGroupId}`);
+        }
+      }
+
       // Calculate next position by checking database (single facility queue)
       const { data: existingQueue } = await supabase
         .from('queue')
@@ -69,7 +111,7 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
         .from('queue')
         .insert({
           player_id,
-          group_id: group_id || null,
+          group_id: finalGroupId || null,
           position: nextPosition,
           status: 'waiting',
         });

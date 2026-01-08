@@ -10,8 +10,9 @@ import {
   PlayCircle, CheckCircle, Users, Clock, TrendingUp, BarChart3,
   UserX, AlertTriangle, ChevronDown, ChevronRight, Zap, Activity, Search, Lock, Unlock, GripVertical
 } from 'lucide-react';
-import { skillLevelToPreferenceGroup } from '@/lib/utils/skillLevel';
+import { getSkillLevelLabel } from '@/lib/utils/skillLevel';
 import { QRScanner } from '@/components/QRScanner';
+import { PlayerAvatar } from '@/components/ui/PlayerAvatar';
 import {
   DndContext,
   closestCenter,
@@ -56,14 +57,24 @@ function SortableQueueItem({ entry, countdown, onRemove }: any) {
       className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 cursor-grab active:cursor-grabbing"
     >
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 flex-1">
+        <div className="flex items-center gap-3 flex-1">
           <GripVertical className="w-4 h-4 text-gray-400" />
           <span className="font-bold text-sm text-blue-600">#{entry.position}</span>
-          <div className="flex-1">
-            <p className="font-semibold text-sm">{entry.player.name}</p>
+          
+          {/* Player Photo */}
+          <PlayerAvatar
+            name={entry.player.name}
+            photo_url={entry.player.photo_url}
+            display_photo={(entry as any).session?.display_photo}
+            size="sm"
+            className="shrink-0"
+          />
+          
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold text-sm truncate">{entry.player.name}</p>
             <p className="text-xs text-gray-500">
-              {skillLevelToPreferenceGroup(entry.player.skill_level) === 'beginner' ? 'Beginner' : 'Intermediate+'}
-              {entry.group_id && ' • Group'}
+              {getSkillLevelLabel(entry.player.skill_level)}
+              {entry.group_id ? ` • ${(entry as any).group?.name || 'Group'}` : ' • Solo'}
             </p>
             {countdown && (
               <p className="text-xs text-orange-600 font-mono mt-0.5">
@@ -456,8 +467,15 @@ export default function AdminDashboardRedesign() {
         throw new Error(`Player ${match.players[0].name} doesn't have an active session. Check them in first at /cashier.`);
       }
 
-      // Assign court and start 20-minute timer
-      await assignSession(courtId);
+      // Assign court and start 20-minute timer with player data
+      const playerData = match.players.map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        skill_level: p.skill_level,
+        photo_url: p.photo_url || null
+      }));
+      
+      await assignSession(courtId, playerData);
 
       try {
         await fetch('/api/match-history/create', {
@@ -472,6 +490,9 @@ export default function AdminDashboardRedesign() {
         console.error('Failed to create match history:', historyError);
       }
 
+      console.log('[MATCH ASSIGNMENT] Starting match assignment for court:', courtId);
+      console.log('[MATCH ASSIGNMENT] Players to assign:', match.players.map(p => ({ id: p.id, name: p.name })));
+
       for (const player of match.players) {
         if (!player || !player.id) {
           console.warn('Skipping invalid player:', player);
@@ -480,6 +501,8 @@ export default function AdminDashboardRedesign() {
 
         const queueEntry = queueEntries.find(e => e.player_id === player.id);
         if (queueEntry) {
+          console.log(`[MATCH ASSIGNMENT] Updating queue entry for ${player.name} (${player.id})`);
+          
           const { error } = await (await import('@/lib/supabase/client')).supabase
             .from('queue')
             .update({ status: 'playing', court_id: courtId })
@@ -487,11 +510,17 @@ export default function AdminDashboardRedesign() {
 
           if (error) {
             console.error('Error updating queue for player', player.id, error);
+            throw new Error(`Failed to update queue for ${player.name}: ${error.message}`);
+          } else {
+            console.log(`[MATCH ASSIGNMENT] Successfully updated queue for ${player.name}`);
           }
         } else {
           console.warn('Queue entry not found for player:', player);
+          throw new Error(`Queue entry not found for player ${player.name}`);
         }
       }
+
+      console.log('[MATCH ASSIGNMENT] All queue entries updated, refreshing data...');
 
       setMatchSuggestions({ ...matchSuggestions, [courtId]: null });
       setVerifiedPlayers({ ...verifiedPlayers, [courtId]: new Set() });
@@ -501,6 +530,7 @@ export default function AdminDashboardRedesign() {
       await fetchQueue();
       await fetchCourts();
 
+      console.log('[MATCH ASSIGNMENT] Match assignment completed successfully');
       alert('Match started successfully! Players are now on court.');
     } catch (error) {
       console.error('Match assignment error:', error);
@@ -759,29 +789,62 @@ export default function AdminDashboardRedesign() {
   };
 
   const openMatchCompletionModalWithData = (courtId: string, entries: any[]) => {
-    // Get players currently on this court
-    const playingOnCourt = entries.filter(
-      e => e.status === 'playing' && e.court_id === courtId
-    );
+    // First try to get players from court's stored data (handles session expiry)
+    const court = courts.find(c => c.id === courtId);
+    let playersData = [];
 
-    console.log(`[Auto-Complete Debug] Court ${courtId}:`, {
-      totalEntries: entries.length,
-      playingOnCourt: playingOnCourt.length,
-      allStatuses: entries.map(e => ({ name: e.player?.name, status: e.status, court_id: e.court_id }))
+    console.log(`[Match Completion Debug] Court ${courtId}:`, {
+      courtFound: !!court,
+      courtCurrentPlayers: court ? (court as any).current_players : null,
+      queueEntries: entries.length
     });
 
-    if (playingOnCourt.length !== 4) {
-      alert(`Expected 4 players on court, found ${playingOnCourt.length}`);
+    if (court && (court as any).current_players && Array.isArray((court as any).current_players)) {
+      // Use stored player data from court - convert to expected format
+      const storedPlayers = (court as any).current_players;
+      playersData = storedPlayers.map((p: any) => ({
+        player_id: p.id,
+        player: {
+          name: p.name,
+          skill_level: p.skill_level || 3.5, // Default skill if not stored
+          photo_url: p.photo_url
+        }
+      }));
+      console.log(`[Match Completion Debug] Using stored court data for ${courtId}:`, playersData);
+    } else {
+      // Fallback: Get players currently on this court from queue
+      const playingOnCourt = entries.filter(
+        e => e.status === 'playing' && e.court_id === courtId
+      );
+
+      console.log(`[Match Completion Debug] Court ${courtId} fallback to queue:`, {
+        totalEntries: entries.length,
+        playingOnCourt: playingOnCourt.length,
+        allStatuses: entries.map(e => ({ name: e.player?.name, status: e.status, court_id: e.court_id }))
+      });
+
+      if (playingOnCourt.length !== 4) {
+        alert(`Expected 4 players on court, found ${playingOnCourt.length}. Players may have expired sessions. Using stored court data if available.`);
+        return;
+      }
+
+      playersData = playingOnCourt; // Queue data is already in the right format
+    }
+
+    if (playersData.length !== 4) {
+      alert(`Expected 4 players on court, found ${playersData.length}. Cannot complete match.`);
       return;
     }
 
+    console.log(`[Match Completion Debug] Final player data:`, playersData);
+
     // Auto-assign teams (first 2 to Team A, last 2 to Team B)
-    const playerIds = playingOnCourt.map(e => e.player_id);
+    const playerIds = playersData.map((p: any) => p.player_id);
 
     setMatchCompletionModal({
       isOpen: true,
       courtId,
-      players: playingOnCourt,
+      players: playersData, // Use the player data we found
       teamA: [playerIds[0], playerIds[1]],
       teamB: [playerIds[2], playerIds[3]],
       teamAScore: 0,
@@ -1369,7 +1432,7 @@ export default function AdminDashboardRedesign() {
                     <div className="flex-1">
                       <p className="font-semibold">{member.player.name}</p>
                       <p className="text-xs text-gray-600">
-                        {skillLevelToPreferenceGroup(member.player.skill_level) === 'beginner' ? 'Beginner/Novice' : 'Intermediate/Advanced'}
+                        {getSkillLevelLabel(member.player.skill_level)}
                       </p>
                     </div>
                   </label>

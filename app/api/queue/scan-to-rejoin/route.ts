@@ -59,6 +59,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Check if player is member of a permanent group
+    const { data: groupMembership } = await supabaseServer
+      .from('group_members')
+      .select('group_id')
+      .eq('player_id', player.id)
+      .single();
+
+    // If not in a permanent group, check previous queue entry
+    let finalGroupId = groupMembership?.group_id;
+    if (!finalGroupId) {
+      const { data: previousEntry } = await supabaseServer
+        .from('queue')
+        .select('group_id')
+        .eq('player_id', player.id)
+        .order('joined_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      finalGroupId = previousEntry?.group_id;
+    }
+
     // Get next position in queue
     const { data: maxPosition } = await supabaseServer
       .from('queue')
@@ -69,13 +90,14 @@ export async function POST(request: NextRequest) {
 
     const nextPosition = (maxPosition?.position || 0) + 1;
 
-    // Add player to queue
+    // Add player to queue with their group_id (from permanent group or previous entry)
     const { data: newEntry, error: insertError } = await supabaseServer
       .from('queue')
       .insert({
         player_id: player.id,
         position: nextPosition,
         status: 'waiting',
+        group_id: finalGroupId || null,
       })
       .select()
       .single();

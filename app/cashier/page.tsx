@@ -22,76 +22,17 @@ export default function CashierPage() {
   const [qrCode, setQrCode] = useState('');
   const [player, setPlayer] = useState<Player | null>(null);
 
-  // Helper function to get valid gender preference options based on player gender
-  const getGenderPreferenceOptions = (playerGender: 'male' | 'female' | 'other') => {
-    if (playerGender === 'male') {
-      return [
-        { value: 'random', label: 'Random' },
-        { value: 'mens', label: "Men's" },
-        { value: 'mixed', label: 'Mixed' },
-      ];
-    } else if (playerGender === 'female') {
-      return [
-        { value: 'random', label: 'Random' },
-        { value: 'womens', label: "Women's" },
-        { value: 'mixed', label: 'Mixed' },
-      ];
-    } else {
-      // For 'other' gender, show mixed and random only
-      return [
-        { value: 'random', label: 'Random' },
-        { value: 'mixed', label: 'Mixed' },
-      ];
-    }
-  };
-
-  // Helper function for group mode - determine valid options based on group composition
-  const getGroupGenderPreferenceOptions = (members: GroupMember[]) => {
-    if (members.length === 0) {
-      return [
-        { value: 'random', label: 'Random' },
-        { value: 'mens', label: "Men's" },
-        { value: 'womens', label: "Women's" },
-        { value: 'mixed', label: 'Mixed' },
-      ];
-    }
-
-    const genders = members.map(m => m.gender);
-    const allMale = genders.every(g => g === 'male');
-    const allFemale = genders.every(g => g === 'female');
-    const isMixed = !allMale && !allFemale;
-
-    if (allMale) {
-      return [
-        { value: 'random', label: 'Random' },
-        { value: 'mens', label: "Men's" },
-        { value: 'mixed', label: 'Mixed' },
-      ];
-    } else if (allFemale) {
-      return [
-        { value: 'random', label: 'Random' },
-        { value: 'womens', label: "Women's" },
-        { value: 'mixed', label: 'Mixed' },
-      ];
-    } else {
-      // Mixed group - can only play Mixed or Random
-      return [
-        { value: 'random', label: 'Random' },
-        { value: 'mixed', label: 'Mixed' },
-      ];
-    }
-  };
-
   // Group mode state
   const [groupMembers, setGroupMembers] = useState<GroupMember[]>([]);
   const [currentScanQr, setCurrentScanQr] = useState('');
 
   // Shared state
-  const [preferences, setPreferences] = useState<Partial<PlayerPreferences>>({
-    skill_level_pref: 'beginner',
-    gender_pref: 'random',
+  const [preferences] = useState<Partial<PlayerPreferences>>({
+    skill_level_pref: 'beginner', // Default value, not used by algorithm
+    gender_pref: 'random', // Default value, not used by algorithm
     match_type: 'solo',
   });
+  const [displayPhoto, setDisplayPhoto] = useState(true); // Photo display preference
   const [loading, setLoading] = useState(false);
   const [sessionStarted, setSessionStarted] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
@@ -99,19 +40,6 @@ export default function CashierPage() {
   const [timeRemaining, setTimeRemaining] = useState<string>('');
 
   const { addToQueue, queueEntries } = useStore();
-
-  // Validate gender preference when group composition changes
-  useEffect(() => {
-    if (isGroupMode && groupMembers.length > 0) {
-      const validOptions = getGroupGenderPreferenceOptions(groupMembers);
-      const isValidGenderPref = validOptions.some(opt => opt.value === preferences.gender_pref);
-
-      if (!isValidGenderPref) {
-        // Reset to 'random' if current preference is no longer valid
-        setPreferences({ ...preferences, gender_pref: 'random' });
-      }
-    }
-  }, [groupMembers, isGroupMode]);
 
   // Solo mode: Validate and set single player
   const validateQRCodeSolo = async (qrCodeValue: string) => {
@@ -146,20 +74,7 @@ export default function CashierPage() {
       setPlayer(data.player);
       setQrCode(qrCodeValue);
 
-      // Load previous preferences if they exist
-      if (data.player.preferences?.length > 0) {
-        const prefs = data.player.preferences[0];
-
-        // Validate gender_pref against player's gender
-        const validOptions = getGenderPreferenceOptions(data.player.gender);
-        const isValidGenderPref = validOptions.some(opt => opt.value === prefs.gender_pref);
-
-        setPreferences({
-          skill_level_pref: prefs.skill_level_pref,
-          gender_pref: isValidGenderPref ? prefs.gender_pref : 'random', // Reset to 'random' if invalid
-          match_type: prefs.match_type,
-        });
-      }
+      // Note: Preferences are no longer used by the matchmaking algorithm
     } catch (error) {
       alert('Failed to validate QR code: ' + (error as Error).message);
     } finally {
@@ -256,6 +171,7 @@ export default function CashierPage() {
         body: JSON.stringify({
           player_id: player.id,
           preferences,
+          display_photo: displayPhoto,
         }),
       });
 
@@ -292,11 +208,6 @@ export default function CashierPage() {
         setSuccessMessage('');
         setIsRejoining(false);
         setTimeRemaining('');
-        setPreferences({
-          skill_level_pref: 'beginner',
-          gender_pref: 'random',
-          match_type: 'solo',
-        });
       }, 3000);
     } catch (error) {
       alert('Failed to start session: ' + (error as Error).message);
@@ -332,6 +243,7 @@ export default function CashierPage() {
               ...preferences,
               match_type: 'group', // Force group mode
             },
+            display_photo: displayPhoto,
           }),
         });
 
@@ -373,11 +285,6 @@ export default function CashierPage() {
         setSuccessMessage('');
         setIsRejoining(false);
         setTimeRemaining('');
-        setPreferences({
-          skill_level_pref: 'beginner',
-          gender_pref: 'random',
-          match_type: 'solo',
-        });
       }, 3000);
     } catch (error) {
       alert('Failed to start group session: ' + (error as Error).message);
@@ -590,23 +497,45 @@ export default function CashierPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <Select
-                  label="Skill Preference"
-                  value={preferences.skill_level_pref}
-                  onChange={(e) => setPreferences({ ...preferences, skill_level_pref: e.target.value as any })}
-                  options={[
-                    { value: 'beginner', label: 'Beginner/Novice' },
-                    { value: 'intermediate_advanced', label: 'Intermediate/Advanced' },
-                  ]}
-                />
-
-                <Select
-                  label="Gender Preference"
-                  value={preferences.gender_pref}
-                  onChange={(e) => setPreferences({ ...preferences, gender_pref: e.target.value as any })}
-                  options={getGenderPreferenceOptions(player.gender)}
-                />
+              {/* Photo Display Preference */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h3 className="font-semibold text-blue-900 mb-3">Display Preference</h3>
+                <div className="space-y-3">
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="displayPhoto"
+                      checked={displayPhoto}
+                      onChange={() => setDisplayPhoto(true)}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <div className="flex items-center gap-2">
+                      {player.photo_url && (
+                        <img
+                          src={player.photo_url}
+                          alt={player.name}
+                          className="w-8 h-8 rounded-full object-cover"
+                        />
+                      )}
+                      <span>Show my photo on displays</span>
+                    </div>
+                  </label>
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="displayPhoto"
+                      checked={!displayPhoto}
+                      onChange={() => setDisplayPhoto(false)}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center text-sm font-bold text-gray-700">
+                        {player.name.split(' ').map(n => n[0]).join('').toUpperCase()}
+                      </div>
+                      <span>Show my initials instead</span>
+                    </div>
+                  </label>
+                </div>
               </div>
 
               <Button
@@ -622,33 +551,14 @@ export default function CashierPage() {
           </Card>
         )}
 
-        {/* Group Mode: Preferences & Start Button */}
+        {/* Group Mode: Start Button */}
         {isGroupMode && groupMembers.length >= 2 && (
           <Card>
             <CardHeader>
-              <h2 className="text-xl font-bold">Group Preferences</h2>
-              <p className="text-sm text-gray-600 mt-1">These preferences will apply to all group members</p>
+              <h2 className="text-xl font-bold">Ready to Start Group Session</h2>
+              <p className="text-sm text-gray-600 mt-1">All group members will be matched together</p>
             </CardHeader>
             <CardBody className="space-y-6">
-              <div className="grid grid-cols-2 gap-4">
-                <Select
-                  label="Skill Preference"
-                  value={preferences.skill_level_pref}
-                  onChange={(e) => setPreferences({ ...preferences, skill_level_pref: e.target.value as any })}
-                  options={[
-                    { value: 'beginner', label: 'Beginner/Novice' },
-                    { value: 'intermediate_advanced', label: 'Intermediate/Advanced' },
-                  ]}
-                />
-
-                <Select
-                  label="Gender Preference"
-                  value={preferences.gender_pref}
-                  onChange={(e) => setPreferences({ ...preferences, gender_pref: e.target.value as any })}
-                  options={getGroupGenderPreferenceOptions(groupMembers)}
-                />
-              </div>
-
               <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
                 <div className="flex items-start gap-3">
                   <Check className="w-5 h-5 text-purple-600 mt-0.5" />
@@ -658,6 +568,67 @@ export default function CashierPage() {
                       These {groupMembers.length} players will receive highest priority to be matched together when courts become available.
                     </p>
                   </div>
+                </div>
+              </div>
+
+              {/* Photo Display Preference for Group */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h3 className="font-semibold text-blue-900 mb-3">Display Preference (applies to all group members)</h3>
+                <div className="space-y-3">
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="groupDisplayPhoto"
+                      checked={displayPhoto}
+                      onChange={() => setDisplayPhoto(true)}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <div className="flex items-center gap-2">
+                      <div className="flex -space-x-2">
+                        {groupMembers.slice(0, 3).map((member, idx) => (
+                          <img
+                            key={member.id}
+                            src={member.photo_url || '/logo.png'}
+                            alt={member.name}
+                            className="w-8 h-8 rounded-full object-cover border-2 border-white"
+                          />
+                        ))}
+                        {groupMembers.length > 3 && (
+                          <div className="w-8 h-8 bg-gray-300 rounded-full border-2 border-white flex items-center justify-center text-xs font-bold text-gray-700">
+                            +{groupMembers.length - 3}
+                          </div>
+                        )}
+                      </div>
+                      <span>Show photos on displays</span>
+                    </div>
+                  </label>
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="groupDisplayPhoto"
+                      checked={!displayPhoto}
+                      onChange={() => setDisplayPhoto(false)}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <div className="flex items-center gap-2">
+                      <div className="flex -space-x-2">
+                        {groupMembers.slice(0, 3).map((member, idx) => (
+                          <div
+                            key={member.id}
+                            className="w-8 h-8 bg-gray-300 rounded-full border-2 border-white flex items-center justify-center text-xs font-bold text-gray-700"
+                          >
+                            {member.name.split(' ').map(n => n[0]).join('').toUpperCase()}
+                          </div>
+                        ))}
+                        {groupMembers.length > 3 && (
+                          <div className="w-8 h-8 bg-gray-400 rounded-full border-2 border-white flex items-center justify-center text-xs font-bold text-white">
+                            +{groupMembers.length - 3}
+                          </div>
+                        )}
+                      </div>
+                      <span>Show initials instead</span>
+                    </div>
+                  </label>
                 </div>
               </div>
 

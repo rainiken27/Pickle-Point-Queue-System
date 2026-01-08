@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
     // First check if court exists and is available
     const { data: courtCheck, error: checkError } = await supabaseServer
       .from('courts')
-      .select('id, court_number, building, status, reserved_by, reserved_until, reserved_note')
+      .select('id, court_number, status, reserved_by, reserved_until, reserved_note')
       .eq('id', court_id)
       .maybeSingle(); // Use maybeSingle instead of single to handle 0 results gracefully
 

@@ -8,6 +8,86 @@ import { Court, QueueEntryWithPlayer } from '@/types';
 import { getSkillLevelLabel } from '@/lib/utils/skillLevel';
 import { formatCountdown, formatCountdownMs } from '@/lib/session/timer';
 import { getCourtRemainingMs } from '@/lib/session/courtTimer';
+import { PlayerAvatar } from '@/components/ui/PlayerAvatar';
+
+// Types for display grouping
+interface DisplayUnit {
+  type: 'group' | 'solo_stack';
+  players: QueueEntryWithPlayer[];
+  placeholderCount: number;
+  isComplete: boolean;
+  groupName?: string;
+}
+
+// Function to create display units (matchable groups for visual display)
+function createDisplayUnits(queueEntries: QueueEntryWithPlayer[]): DisplayUnit[] {
+  const units: DisplayUnit[] = [];
+  const processedPlayerIds = new Set<string>();
+  
+  // Sort by position to process in queue order
+  const sortedEntries = [...queueEntries].sort((a, b) => a.position - b.position);
+  
+  let i = 0;
+  while (i < sortedEntries.length) {
+    const entry = sortedEntries[i];
+    
+    if (processedPlayerIds.has(entry.player_id)) {
+      i++;
+      continue;
+    }
+    
+    if (entry.group_id) {
+      // Process group
+      const groupMembers = queueEntries
+        .filter(e => e.group_id === entry.group_id)
+        .sort((a, b) => a.position - b.position);
+
+      // Get group name from the first member's group data
+      const groupName = (entry as any).group?.name || `Group ${groupMembers.length}`;
+
+      units.push({
+        type: 'group',
+        players: groupMembers,
+        placeholderCount: Math.max(0, 4 - groupMembers.length),
+        isComplete: groupMembers.length === 4,
+        groupName: groupName
+      });
+      
+      groupMembers.forEach(member => processedPlayerIds.add(member.player_id));
+      i++;
+    } else {
+      // Solo player - find the earliest solo stack that has room, or create new one
+      let addedToExistingStack = false;
+      
+      // Check if we can add to an existing solo stack
+      for (const unit of units) {
+        if (unit.type === 'solo_stack' && unit.players.length < 4) {
+          unit.players.push(entry);
+          unit.placeholderCount = Math.max(0, 4 - unit.players.length);
+          unit.isComplete = unit.players.length === 4;
+          processedPlayerIds.add(entry.player_id);
+          addedToExistingStack = true;
+          break;
+        }
+      }
+      
+      // If no existing stack has room, create a new one
+      if (!addedToExistingStack) {
+        units.push({
+          type: 'solo_stack',
+          players: [entry],
+          placeholderCount: 3,
+          isComplete: false
+        });
+        processedPlayerIds.add(entry.player_id);
+      }
+      
+      i++;
+    }
+  }
+  
+  return units;
+}
 
 export default function TVDisplay() {
   const { queueEntries, fetchQueue, subscribeToQueue } = useQueue();
@@ -169,22 +249,14 @@ export default function TVDisplay() {
                       {courtPlayers.length > 0 && (
                         <div className="flex justify-center items-center gap-2 mt-2">
                           {courtPlayers.map((entry) => (
-                            <div
+                            <PlayerAvatar
                               key={entry.id}
-                              className="w-16 h-16 rounded-full overflow-hidden bg-white/10 border-2 border-white/40"
-                            >
-                              {entry.player.photo_url ? (
-                                <img
-                                  src={entry.player.photo_url}
-                                  alt={entry.player.name}
-                                  className="w-full h-full object-cover"
-                                />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center text-white text-xl font-bold">
-                                  {entry.player.name.charAt(0).toUpperCase()}
-                                </div>
-                              )}
-                            </div>
+                              name={entry.player.name}
+                              photo_url={entry.player.photo_url}
+                              display_photo={(entry as any).session?.display_photo}
+                              size="lg"
+                              className="border-2 border-white/40"
+                            />
                           ))}
                         </div>
                       )}
@@ -209,58 +281,118 @@ export default function TVDisplay() {
             </div>
           ) : (
             <div className="space-y-4 overflow-y-auto flex-1 pr-2">
-              {waitingQueue.map((entry, index) => {
-                const sessionCountdown = getSessionCountdown(entry.player_id);
-
-                return (
+              {(() => {
+                const displayUnits = createDisplayUnits(waitingQueue);
+                let positionCounter = 1;
+                
+                return displayUnits.map((unit, unitIndex) => (
                   <div
-                    key={entry.id}
-                    className={`p-4 rounded-lg transition-all ${
-                      index === 0
-                        ? 'bg-yellow-500/30 border border-yellow-400/40'
-                        : 'bg-white/5 border border-white/5'
+                    key={`unit-${unitIndex}`}
+                    className={`p-4 rounded-lg transition-all border-2 ${
+                      unit.isComplete
+                        ? 'bg-amber-500/20 border-amber-400/60 shadow-lg shadow-amber-500/20' // Gold outline for complete groups
+                        : unitIndex === 0
+                        ? 'bg-yellow-500/30 border-yellow-400/40'
+                        : 'bg-white/5 border-white/10'
                     }`}
                   >
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-white text-2xl w-12">#{index + 1}</span>
+                    {/* Unit Header */}
+                    {unit.type === 'group' && (
+                      <div className="text-center mb-2">
+                        <span className={`text-sm font-bold px-2 py-1 rounded ${
+                          unit.isComplete 
+                            ? 'bg-amber-500 text-white' 
+                            : 'bg-blue-500 text-white'
+                        }`}>
+                          {unit.groupName} {unit.isComplete ? '(Ready!)' : `(${unit.players.length}/4)`}
+                        </span>
+                      </div>
+                    )}
+                    
+                    {unit.type === 'solo_stack' && (
+                      <div className="text-center mb-2">
+                        <span className="text-sm font-bold px-2 py-1 rounded bg-gray-600 text-white">
+                          {unit.players.length === 1 
+                            ? 'Needs 3 More Players'
+                            : unit.players.length === 2
+                            ? 'Needs 2 More Players' 
+                            : unit.players.length === 3
+                            ? 'Needs 1 More Player'
+                            : 'Solo Stack (Ready!)'
+                          }
+                        </span>
+                      </div>
+                    )}
 
-                      {/* Player Photo - Larger */}
-                      <div className="w-20 h-20 rounded-full overflow-hidden bg-white/10 shrink-0 border-2 border-white/20">
-                        {entry.player.photo_url ? (
-                          <img
-                            src={entry.player.photo_url}
-                            alt={entry.player.name}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-white text-3xl font-bold">
-                            {entry.player.name.charAt(0).toUpperCase()}
+                    {/* Players in this unit */}
+                    <div className="space-y-2">
+                      {unit.players.map((entry) => {
+                        const sessionCountdown = getSessionCountdown(entry.player_id);
+                        const currentPosition = positionCounter++;
+                        
+                        return (
+                          <div key={entry.id} className="flex items-center gap-2">
+                            <span className="font-bold text-white text-xl w-10">#{currentPosition}</span>
+
+                            {/* Player Photo */}
+                            <PlayerAvatar
+                              name={entry.player.name}
+                              photo_url={entry.player.photo_url}
+                              display_photo={(entry as any).session?.display_photo}
+                              size="lg"
+                              className="shrink-0 border-2 border-white/20"
+                            />
+
+                            <div className="flex-1 min-w-0">
+                              {/* Player Name */}
+                              <div className="font-bold text-white truncate text-xl">
+                                {entry.player.name}
+                              </div>
+                              {/* Skill Level */}
+                              <div className="text-base text-white/80 font-medium">
+                                {getSkillLevelLabel(entry.player.skill_level)}
+                              </div>
+                            </div>
+
+                            {/* Session Countdown */}
+                            {sessionCountdown && (
+                              <div className="text-base text-white shrink-0 font-mono font-bold">
+                                <Clock className="w-4 h-4 inline mr-1" />
+                                {sessionCountdown}
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-
-                      <div className="flex-1 min-w-0">
-                        {/* Player Name - Larger */}
-                        <div className="font-bold text-white truncate text-2xl">
-                          {entry.player.name}
-                        </div>
-                        {/* Skill Level - Larger */}
-                        <div className="text-lg text-white/80 font-medium">
-                          {getSkillLevelLabel(entry.player.skill_level)}
-                        </div>
-                      </div>
-
-                      {/* Session Countdown - Larger and White */}
-                      {sessionCountdown && (
-                        <div className="text-lg text-white shrink-0 font-mono font-bold">
-                          <Clock className="w-5 h-5 inline mr-1" />
-                          {sessionCountdown}
+                        );
+                      })}
+                      
+                      {/* Placeholder spots for incomplete units */}
+                      {unit.placeholderCount > 0 && (
+                        <div className="space-y-2">
+                          {Array.from({ length: unit.placeholderCount }).map((_, i) => {
+                            const currentPosition = positionCounter++;
+                            return (
+                              <div key={`placeholder-${i}`} className="flex items-center gap-2 opacity-50">
+                                <span className="font-bold text-white text-xl w-10">#{currentPosition}</span>
+                                
+                                {/* Empty placeholder circle */}
+                                <div className="w-16 h-16 rounded-full border-2 border-dashed border-white/40 shrink-0 flex items-center justify-center">
+                                  <span className="text-white/60 text-sm">?</span>
+                                </div>
+                                
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-white/60 text-xl italic">
+                                    Waiting for player...
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
                   </div>
-                );
-              })}
+                ));
+              })()}
             </div>
           )}
         </div>

@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 const StartSessionSchema = z.object({
   player_id: z.string().uuid(),
+  display_photo: z.boolean().optional().default(true),
   preferences: z.object({
     skill_level_pref: z.enum(['beginner', 'intermediate_advanced']),
     gender_pref: z.enum(['mens', 'womens', 'mixed', 'random']),
@@ -14,7 +15,7 @@ const StartSessionSchema = z.object({
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { player_id, preferences } = StartSessionSchema.parse(body);
+    const { player_id, display_photo, preferences } = StartSessionSchema.parse(body);
 
     // Check if player already has an active session
     const { data: existingSessions } = await supabaseServer
@@ -23,9 +24,20 @@ export async function POST(request: NextRequest) {
       .eq('player_id', player_id)
       .eq('status', 'active');
 
-    // If active session exists, return it (idempotent - allows rejoining after breaks)
+    // If active session exists, update display_photo preference and return it
     if (existingSessions && existingSessions.length > 0) {
       const existingSession = existingSessions[0];
+      
+      // Update display_photo preference for existing session
+      const { error: updateError } = await supabaseServer
+        .from('sessions')
+        .update({ display_photo })
+        .eq('id', existingSession.id);
+
+      if (updateError) {
+        console.error('Failed to update display_photo:', updateError);
+      }
+
       const startTime = new Date(existingSession.start_time).getTime();
       const now = Date.now();
       const elapsed = now - startTime;
@@ -36,7 +48,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json(
         {
-          session: existingSession,
+          session: { ...existingSession, display_photo },
           rejoining: true,
           time_remaining: {
             ms: remaining,
@@ -56,6 +68,7 @@ export async function POST(request: NextRequest) {
         player_id,
         status: 'active',
         start_time: new Date().toISOString(),
+        display_photo,
       })
       .select()
       .single();

@@ -26,11 +26,26 @@ export async function POST(request: NextRequest) {
 
     console.log(`[MATCHMAKING] ${queueData?.length || 0} waiting players in queue`);
 
-    // Generate match using matchmaking engine (single facility)
-    const match = await matchmakingEngine.generateMatch(
-      court_id,
+    // Fetch available courts to enable multi-court optimization
+    const { data: courtsData, error: courtsError } = await supabaseServer
+      .from('courts')
+      .select('id')
+      .eq('status', 'available')
+      .order('court_number', { ascending: true });
+
+    if (courtsError) throw courtsError;
+
+    const availableCourts = courtsData?.map(c => c.id) || [];
+    console.log(`[MATCHMAKING] ${availableCourts.length} available courts`);
+
+    // Use new multi-court algorithm for better group efficiency
+    const matches = await matchmakingEngine.generateMatches(
+      availableCourts,
       queueData || []
     );
+
+    // Find the match for the requested court (or return the first match)
+    const match = matches.find(m => m.court_id === court_id) || matches[0] || null;
 
     if (!match) {
       return NextResponse.json(
