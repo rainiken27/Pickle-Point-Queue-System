@@ -14,15 +14,38 @@ const StartSessionSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    // Check Supabase connection first
+    try {
+      // Test connection by checking if we can access the client
+      if (!supabaseServer) {
+        throw new Error('Supabase client not initialized');
+      }
+    } catch (initError) {
+      console.error('[SESSION START] Supabase initialization error:', initError);
+      return NextResponse.json(
+        { 
+          error: 'Server configuration error', 
+          message: 'Database connection not available. Please check environment variables.',
+          details: (initError as Error).message
+        },
+        { status: 500 }
+      );
+    }
+
     const body = await request.json();
     const { player_id, display_photo, preferences } = StartSessionSchema.parse(body);
 
     // Check if player already has an active session
-    const { data: existingSessions } = await supabaseServer
+    const { data: existingSessions, error: checkError } = await supabaseServer
       .from('sessions')
       .select('*')
       .eq('player_id', player_id)
       .eq('status', 'active');
+
+    if (checkError) {
+      console.error('[SESSION START] Error checking existing sessions:', checkError);
+      throw new Error(`Database query failed: ${checkError.message}`);
+    }
 
     // If active session exists, update display_photo preference and return it
     if (existingSessions && existingSessions.length > 0) {
@@ -76,6 +99,38 @@ export async function POST(request: NextRequest) {
     if (error) {
       console.error('[SESSION START] Database error:', error);
       console.error('[SESSION START] Error details:', JSON.stringify(error, null, 2));
+      console.error('[SESSION START] Error code:', (error as any).code);
+      console.error('[SESSION START] Error hint:', (error as any).hint);
+      console.error('[SESSION START] Error details:', (error as any).details);
+      
+      // Check for specific database errors
+      const errorCode = (error as any).code;
+      const errorMessage = error.message || String(error);
+      
+      // Column doesn't exist error
+      if (errorCode === '42703' || errorMessage.includes('column') && errorMessage.includes('does not exist')) {
+        return NextResponse.json(
+          { 
+            error: 'Database schema error', 
+            message: 'The display_photo column is missing. Please run database migrations.',
+            details: errorMessage
+          },
+          { status: 500 }
+        );
+      }
+      
+      // Foreign key constraint error
+      if (errorCode === '23503' || errorMessage.includes('foreign key')) {
+        return NextResponse.json(
+          { 
+            error: 'Invalid player', 
+            message: 'Player not found in database.',
+            details: errorMessage
+          },
+          { status: 400 }
+        );
+      }
+      
       throw error;
     }
 
