@@ -20,72 +20,129 @@ interface DisplayUnit {
 }
 
 // Function to create display units (matchable groups for visual display)
+// This mirrors the matchmaking algorithm's logic for visual consistency
 function createDisplayUnits(queueEntries: QueueEntryWithPlayer[]): DisplayUnit[] {
   const units: DisplayUnit[] = [];
   const processedPlayerIds = new Set<string>();
-  
+
   // Sort by position to process in queue order
   const sortedEntries = [...queueEntries].sort((a, b) => a.position - b.position);
-  
+
+  // Build matchable units similar to matchmaking algorithm
+  const matchableUnits: { players: QueueEntryWithPlayer[]; startPosition: number; groupName?: string }[] = [];
+
+  // First, identify all groups
+  const groupMap = new Map<string, QueueEntryWithPlayer[]>();
+  for (const entry of sortedEntries) {
+    if (entry.group_id) {
+      if (!groupMap.has(entry.group_id)) {
+        groupMap.set(entry.group_id, []);
+      }
+      groupMap.get(entry.group_id)!.push(entry);
+    }
+  }
+
+  // Create units for groups
+  for (const [groupId, members] of groupMap) {
+    const sortedMembers = members.sort((a, b) => a.position - b.position);
+    const groupName = (members[0] as any).group?.name || `Group ${members.length}`;
+
+    matchableUnits.push({
+      players: sortedMembers,
+      startPosition: sortedMembers[0].position,
+      groupName: members.length < 4 ? groupName : groupName
+    });
+
+    members.forEach(m => processedPlayerIds.add(m.player_id));
+  }
+
+  // Add solo players as individual units
+  for (const entry of sortedEntries) {
+    if (!processedPlayerIds.has(entry.player_id)) {
+      matchableUnits.push({
+        players: [entry],
+        startPosition: entry.position
+      });
+      processedPlayerIds.add(entry.player_id);
+    }
+  }
+
+  // Sort units by start position
+  matchableUnits.sort((a, b) => a.startPosition - b.startPosition);
+
+  // Now combine units to form matches of 4
+  processedPlayerIds.clear();
   let i = 0;
-  while (i < sortedEntries.length) {
-    const entry = sortedEntries[i];
-    
-    if (processedPlayerIds.has(entry.player_id)) {
+
+  while (i < matchableUnits.length) {
+    const unit = matchableUnits[i];
+
+    // Skip already processed
+    if (unit.players.every(p => processedPlayerIds.has(p.player_id))) {
       i++;
       continue;
     }
-    
-    if (entry.group_id) {
-      // Process group
-      const groupMembers = queueEntries
-        .filter(e => e.group_id === entry.group_id)
-        .sort((a, b) => a.position - b.position);
 
-      // Get group name from the first member's group data
-      const groupName = (entry as any).group?.name || `Group ${groupMembers.length}`;
-
+    // If this is a complete group of 4, show it alone
+    if (unit.groupName && unit.players.length === 4) {
       units.push({
         type: 'group',
-        players: groupMembers,
-        placeholderCount: Math.max(0, 4 - groupMembers.length),
-        isComplete: groupMembers.length === 4,
-        groupName: groupName
+        players: unit.players,
+        placeholderCount: 0,
+        isComplete: true,
+        groupName: unit.groupName
       });
-      
-      groupMembers.forEach(member => processedPlayerIds.add(member.player_id));
+      unit.players.forEach(p => processedPlayerIds.add(p.player_id));
       i++;
-    } else {
-      // Solo player - find the earliest solo stack that has room, or create new one
-      let addedToExistingStack = false;
-      
-      // Check if we can add to an existing solo stack
-      for (const unit of units) {
-        if (unit.type === 'solo_stack' && unit.players.length < 4) {
-          unit.players.push(entry);
-          unit.placeholderCount = Math.max(0, 4 - unit.players.length);
-          unit.isComplete = unit.players.length === 4;
-          processedPlayerIds.add(entry.player_id);
-          addedToExistingStack = true;
-          break;
+      continue;
+    }
+
+    // Build a match of up to 4 players
+    const match: QueueEntryWithPlayer[] = [];
+    let groupName: string | undefined = unit.groupName;
+
+    // Start with this unit
+    match.push(...unit.players);
+    unit.players.forEach(p => processedPlayerIds.add(p.player_id));
+
+    // Try to fill to 4 players
+    for (let j = i + 1; j < matchableUnits.length && match.length < 4; j++) {
+      const nextUnit = matchableUnits[j];
+
+      // Skip if already processed
+      if (nextUnit.players.every(p => processedPlayerIds.has(p.player_id))) {
+        continue;
+      }
+
+      // Skip complete groups of 4 (they play alone)
+      if (nextUnit.groupName && nextUnit.players.length === 4) {
+        continue;
+      }
+
+      // Check if this unit fits
+      if (match.length + nextUnit.players.length <= 4) {
+        match.push(...nextUnit.players);
+        nextUnit.players.forEach(p => processedPlayerIds.add(p.player_id));
+
+        // If we're adding a group to solos, use the group name
+        if (nextUnit.groupName && !groupName) {
+          groupName = nextUnit.groupName;
         }
       }
-      
-      // If no existing stack has room, create a new one
-      if (!addedToExistingStack) {
-        units.push({
-          type: 'solo_stack',
-          players: [entry],
-          placeholderCount: 3,
-          isComplete: false
-        });
-        processedPlayerIds.add(entry.player_id);
-      }
-      
-      i++;
     }
+
+    // Create display unit
+    units.push({
+      type: groupName ? 'solo_stack' : 'solo_stack',
+      players: match,
+      placeholderCount: Math.max(0, 4 - match.length),
+      isComplete: match.length === 4,
+      groupName: groupName
+    });
+
+    i++;
   }
-  
+
   return units;
 }
 
@@ -311,15 +368,38 @@ export default function TVDisplay() {
                     
                     {unit.type === 'solo_stack' && (
                       <div className="text-center mb-2">
-                        <span className="text-sm font-bold px-2 py-1 rounded bg-gray-600 text-white">
-                          {unit.players.length === 1 
-                            ? 'Needs 3 More Players'
-                            : unit.players.length === 2
-                            ? 'Needs 2 More Players' 
-                            : unit.players.length === 3
-                            ? 'Needs 1 More Player'
-                            : 'Solo Stack (Ready!)'
-                          }
+                        <span className={`text-sm font-bold px-2 py-1 rounded ${
+                          unit.isComplete
+                            ? 'bg-amber-500 text-white'
+                            : unit.groupName
+                            ? 'bg-blue-500 text-white'
+                            : 'bg-gray-600 text-white'
+                        }`}>
+                          {unit.groupName ? (
+                            // Mixed unit with group members
+                            <>
+                              {unit.groupName}
+                              {(() => {
+                                // Count solo players (those not in the group)
+                                const soloCount = unit.players.filter(p => !p.group_id).length;
+                                if (soloCount > 0) {
+                                  return ` + ${soloCount} Solo`;
+                                }
+                                return '';
+                              })()}
+                              {' '}
+                              {unit.isComplete ? '(Ready!)' : `(${unit.players.length}/4)`}
+                            </>
+                          ) : (
+                            // Pure solo stack
+                            unit.players.length === 1
+                              ? 'Needs 3 More Players'
+                              : unit.players.length === 2
+                              ? 'Needs 2 More Players'
+                              : unit.players.length === 3
+                              ? 'Needs 1 More Player'
+                              : 'Solo Stack (Ready!)'
+                          )}
                         </span>
                       </div>
                     )}
