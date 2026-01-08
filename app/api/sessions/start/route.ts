@@ -73,7 +73,11 @@ export async function POST(request: NextRequest) {
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error('[SESSION START] Database error:', error);
+      console.error('[SESSION START] Error details:', JSON.stringify(error, null, 2));
+      throw error;
+    }
 
     // Upsert player preferences if provided
     if (preferences) {
@@ -92,15 +96,37 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ session: newSession }, { status: 201 });
   } catch (error) {
+    console.error('[SESSION START] Error:', error);
+    
     if (error instanceof z.ZodError) {
+      console.error('[SESSION START] Validation error:', error.issues);
       return NextResponse.json(
         { error: 'Invalid request data', details: error.issues },
         { status: 400 }
       );
     }
 
+    // Check if it's a Supabase connection error
+    const errorMessage = (error as Error).message;
+    if (errorMessage.includes('Missing Supabase') || errorMessage.includes('environment variables')) {
+      console.error('[SESSION START] Missing environment variables - check SUPABASE_SERVICE_ROLE_KEY');
+      return NextResponse.json(
+        { 
+          error: 'Server configuration error', 
+          message: 'Database connection failed. Please contact support.',
+          details: 'Missing Supabase environment variables'
+        },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json(
-      { error: 'Failed to start session', message: (error as Error).message },
+      { 
+        error: 'Failed to start session', 
+        message: errorMessage,
+        // Include error code if available (for debugging)
+        ...(error && typeof error === 'object' && 'code' in error ? { code: (error as any).code } : {})
+      },
       { status: 500 }
     );
   }

@@ -8,8 +8,14 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 if (!supabaseUrl || !supabaseServiceKey) {
+  // Provide more helpful error message for production debugging
+  const missingVars = [];
+  if (!supabaseUrl) missingVars.push('NEXT_PUBLIC_SUPABASE_URL');
+  if (!supabaseServiceKey) missingVars.push('SUPABASE_SERVICE_ROLE_KEY');
+  
   throw new Error(
-    'Missing Supabase server environment variables. Please check your .env.local file.'
+    `Missing Supabase server environment variables: ${missingVars.join(', ')}. ` +
+    'Please check your Vercel environment variables (Settings → Environment Variables) or .env.local file.'
   );
 }
 
