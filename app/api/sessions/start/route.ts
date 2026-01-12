@@ -35,6 +35,20 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { player_id, display_photo, preferences } = StartSessionSchema.parse(body);
 
+    // Get player info to check unlimited_time flag
+    const { data: player, error: playerError } = await supabaseServer
+      .from('players')
+      .select('unlimited_time')
+      .eq('id', player_id)
+      .single();
+
+    if (playerError) {
+      console.error('[SESSION START] Error fetching player:', playerError);
+      throw new Error(`Failed to fetch player: ${playerError.message}`);
+    }
+
+    const hasUnlimitedTime = player?.unlimited_time || false;
+
     // Check if player already has an active session
     const { data: existingSessions, error: checkError } = await supabaseServer
       .from('sessions')
@@ -50,7 +64,7 @@ export async function POST(request: NextRequest) {
     // If active session exists, update display_photo preference and return it
     if (existingSessions && existingSessions.length > 0) {
       const existingSession = existingSessions[0];
-      
+
       // Update display_photo preference for existing session
       const { error: updateError } = await supabaseServer
         .from('sessions')
@@ -61,6 +75,20 @@ export async function POST(request: NextRequest) {
         console.error('Failed to update display_photo:', updateError);
       }
 
+      // For unlimited time players, return null time_remaining to indicate unlimited
+      if (hasUnlimitedTime) {
+        return NextResponse.json(
+          {
+            session: { ...existingSession, display_photo },
+            rejoining: true,
+            unlimited_time: true,
+            time_remaining: null,
+          },
+          { status: 200 }
+        );
+      }
+
+      // Calculate time remaining for regular players
       const startTime = new Date(existingSession.start_time).getTime();
       const now = Date.now();
       const elapsed = now - startTime;
@@ -73,6 +101,7 @@ export async function POST(request: NextRequest) {
         {
           session: { ...existingSession, display_photo },
           rejoining: true,
+          unlimited_time: false,
           time_remaining: {
             ms: remaining,
             hours: remainingHours,
@@ -149,7 +178,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ session: newSession }, { status: 201 });
+    return NextResponse.json({
+      session: newSession,
+      unlimited_time: hasUnlimitedTime
+    }, { status: 201 });
   } catch (error) {
     console.error('[SESSION START] Error:', error);
     

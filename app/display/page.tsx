@@ -184,7 +184,12 @@ export default function TVDisplay() {
         const { supabase } = await import('@/lib/supabase/client');
         const { data } = await supabase
           .from('sessions')
-          .select('*')
+          .select(`
+            *,
+            players!inner (
+              unlimited_time
+            )
+          `)
           .eq('status', 'active')
           .in('player_id', playerIds);
 
@@ -206,6 +211,11 @@ export default function TVDisplay() {
   const getSessionCountdown = (playerId: string) => {
     const session = sessions[playerId];
     if (!session) return null;
+
+    // Check if player has unlimited time
+    if (session.players?.unlimited_time) {
+      return '∞';
+    }
 
     const startTime = new Date(session.start_time).getTime();
     const fiveHoursInMs = 5 * 60 * 60 * 1000;

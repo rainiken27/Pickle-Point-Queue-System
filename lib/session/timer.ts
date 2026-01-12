@@ -3,12 +3,24 @@ import { Session, ActiveSession } from '@/types';
 const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
 const GRACE_PERIOD_MS = 25 * 60 * 1000;
 
-export function calculateSessionTime(session: Session): ActiveSession {
+export function calculateSessionTime(session: Session, unlimitedTime = false): ActiveSession {
   const startTime = new Date(session.start_time);
   const now = new Date();
   const elapsedMs = now.getTime() - startTime.getTime();
-  const remainingMs = FIVE_HOURS_MS - elapsedMs;
 
+  // For unlimited time, set remaining to a large value and no warnings
+  if (unlimitedTime) {
+    const elapsedMinutes = Math.floor(elapsedMs / 60000);
+    return {
+      ...session,
+      elapsed_minutes: elapsedMinutes,
+      remaining_minutes: Infinity,
+      is_time_warning: false,
+      is_urgent: false,
+    };
+  }
+
+  const remainingMs = FIVE_HOURS_MS - elapsedMs;
   const elapsedMinutes = Math.floor(elapsedMs / 60000);
   const remainingMinutes = Math.floor(remainingMs / 60000);
 
@@ -22,25 +34,35 @@ export function calculateSessionTime(session: Session): ActiveSession {
 }
 
 export function shouldShowSoftWarning(session: ActiveSession): boolean {
+  // No warnings for unlimited time
+  if (session.remaining_minutes === Infinity) return false;
   return session.remaining_minutes <= 30 && session.remaining_minutes > 5;
 }
 
 export function shouldAlertCourtOfficer(session: ActiveSession): boolean {
+  // No alerts for unlimited time
+  if (session.remaining_minutes === Infinity) return false;
   return session.remaining_minutes <= 5;
 }
 
 export function canStartNewGame(session: ActiveSession): boolean {
+  // Can always start if unlimited time
+  if (session.remaining_minutes === Infinity) return true;
   // Can start if more than 5 minutes remaining
   return session.remaining_minutes > 5;
 }
 
 export function isInGracePeriod(session: ActiveSession): boolean {
+  // Never in grace period if unlimited time
+  if (session.remaining_minutes === Infinity) return false;
   // In grace period if time expired but within 25 min grace
   const elapsedMs = session.elapsed_minutes * 60000;
   return elapsedMs > FIVE_HOURS_MS && elapsedMs <= (FIVE_HOURS_MS + GRACE_PERIOD_MS);
 }
 
 export function hasExpired(session: ActiveSession): boolean {
+  // Never expires if unlimited time
+  if (session.remaining_minutes === Infinity) return false;
   const elapsedMs = session.elapsed_minutes * 60000;
   return elapsedMs > (FIVE_HOURS_MS + GRACE_PERIOD_MS);
 }
@@ -48,9 +70,10 @@ export function hasExpired(session: ActiveSession): boolean {
 /**
  * Format remaining time as HH:MM:SS countdown
  * @param remainingMinutes - Remaining time in minutes
- * @returns Formatted string like "02:34:15"
+ * @returns Formatted string like "02:34:15" or "∞" for unlimited
  */
 export function formatCountdown(remainingMinutes: number): string {
+  if (remainingMinutes === Infinity) return '∞';
   if (remainingMinutes <= 0) return '00:00:00';
 
   const totalSeconds = Math.max(0, remainingMinutes * 60);

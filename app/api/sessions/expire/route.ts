@@ -11,10 +11,15 @@ const TOTAL_ALLOWED_MS = FIVE_HOURS_MS + GRACE_PERIOD_MS;
  */
 export async function POST() {
   try {
-    // Find all active sessions
+    // Find all active sessions with player info to check unlimited_time flag
     const { data: activeSessions, error: fetchError } = await supabaseServer
       .from('sessions')
-      .select('*')
+      .select(`
+        *,
+        players!inner (
+          unlimited_time
+        )
+      `)
       .eq('status', 'active');
 
     if (fetchError) throw fetchError;
@@ -32,6 +37,11 @@ export async function POST() {
 
     // Check each session for expiration
     for (const session of activeSessions) {
+      // Skip players with unlimited time
+      if ((session as any).players?.unlimited_time) {
+        continue;
+      }
+
       const startTime = new Date(session.start_time).getTime();
       const elapsed = now - startTime;
 

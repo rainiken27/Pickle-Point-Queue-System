@@ -77,9 +77,13 @@ function SortableQueueItem({ entry, countdown, onRemove }: any) {
               {entry.group_id ? ` • ${(entry as any).group?.name || 'Group'}` : ' • Solo'}
             </p>
             {countdown && (
-              <p className="text-xs text-orange-600 font-mono mt-0.5">
+              <p className={`text-xs font-mono mt-0.5 ${
+                countdown === '∞'
+                  ? 'text-green-600 font-bold'
+                  : 'text-orange-600'
+              }`}>
                 <Clock className="w-3 h-3 inline mr-1" />
-                {countdown}
+                {countdown === '∞' ? 'Unlimited Time' : countdown}
               </p>
             )}
           </div>
@@ -289,9 +293,15 @@ export default function AdminDashboardRedesign() {
         const playerIds = waiting.map(e => e.player_id);
         if (playerIds.length === 0) return;
 
+        // Fetch sessions with player unlimited_time flag
         const { data } = await (await import('@/lib/supabase/client')).supabase
           .from('sessions')
-          .select('*')
+          .select(`
+            *,
+            players!inner (
+              unlimited_time
+            )
+          `)
           .eq('status', 'active')
           .in('player_id', playerIds);
 
@@ -313,6 +323,11 @@ export default function AdminDashboardRedesign() {
   const getSessionCountdown = (playerId: string) => {
     const session = sessions[playerId];
     if (!session) return null;
+
+    // Check if player has unlimited time
+    if (session.players?.unlimited_time) {
+      return '∞';
+    }
 
     const startTime = new Date(session.start_time).getTime();
     const fiveHoursInMs = 5 * 60 * 60 * 1000;

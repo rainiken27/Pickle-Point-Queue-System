@@ -64,9 +64,15 @@ export async function POST(request: NextRequest) {
       // Check if player has a session (active or recently completed)
       // We check for both active and completed sessions because this endpoint
       // is called right after session completion
+      // Also fetch player's unlimited_time flag
       const { data: session, error: sessionError } = await supabaseServer
         .from('sessions')
-        .select('*')
+        .select(`
+          *,
+          players!inner (
+            unlimited_time
+          )
+        `)
         .eq('player_id', entry.player_id)
         .in('status', ['active', 'completed'])
         .order('start_time', { ascending: false })
@@ -93,16 +99,20 @@ export async function POST(request: NextRequest) {
         const fiveHoursInMs = 5 * 60 * 60 * 1000;
         const remaining = fiveHoursInMs - elapsed;
 
+        // Check if player has unlimited time
+        const hasUnlimitedTime = (session as any).players?.unlimited_time || false;
+
         // Allow rejoin if:
-        // 1. Session is active and has time remaining, OR
+        // 1. Session is active and (has unlimited time OR has time remaining), OR
         // 2. Session was just completed (within last 5 minutes)
         const justCompleted = session.status === 'completed' &&
           session.end_time &&
           (now - new Date(session.end_time).getTime()) < 5 * 60 * 1000;
 
-        const isEligible = (session.status === 'active' && remaining > 0) || justCompleted;
+        const isEligible = (session.status === 'active' && (hasUnlimitedTime || remaining > 0)) || justCompleted;
         
         console.log(`[REJOIN] ${entry.player?.name} eligibility:`, {
+          unlimited_time: hasUnlimitedTime,
           remaining_ms: remaining,
           just_completed: justCompleted,
           eligible: isEligible
