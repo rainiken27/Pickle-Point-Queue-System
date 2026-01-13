@@ -123,6 +123,15 @@ export default function AdminDashboardRedesign() {
     groupMembers: [],
     selectedIds: new Set(),
   });
+  const [soloRemovalModal, setSoloRemovalModal] = useState<{
+    isOpen: boolean;
+    queueId: string;
+    playerName: string;
+  }>({
+    isOpen: false,
+    queueId: '',
+    playerName: '',
+  });
   const [currentTime, setCurrentTime] = useState(new Date());
   const [sessions, setSessions] = useState<Record<string, any>>({});
   const [scanQrInput, setScanQrInput] = useState('');
@@ -631,7 +640,7 @@ export default function AdminDashboardRedesign() {
 
   const handleRemoveFromQueue = async (queueId: string, playerName: string) => {
     console.log('[Frontend] handleRemoveFromQueue called with:', { queueId, playerName });
-    
+
     const queueEntry = queueEntries.find(e => e.id === queueId);
 
     if (queueEntry?.group_id) {
@@ -646,22 +655,21 @@ export default function AdminDashboardRedesign() {
       return;
     }
 
-    console.log('[Frontend] Showing removal confirmation dialog');
-    const removalType = confirm(
-      `Remove ${playerName} from queue?\n\n` +
-      `Click OK if they LEFT or NO-SHOW (ends their session)\n` +
-      `Click Cancel if they're just TAKING A BREAK (keeps session active)`
-    );
+    // Show solo removal modal instead of confusing confirm() dialog
+    console.log('[Frontend] Showing solo removal modal');
+    setSoloRemovalModal({
+      isOpen: true,
+      queueId,
+      playerName,
+    });
+  };
 
-    if (removalType === null) {
-      console.log('[Frontend] User cancelled removal');
-      return;
-    }
+  const handleSoloRemovalAction = async (action: 'break' | 'end') => {
+    const { queueId, playerName } = soloRemovalModal;
+    const reason = action === 'end' ? 'left_facility' : 'temporary_break';
+    const shouldEndSession = action === 'end';
 
-    const reason = removalType ? 'left_facility' : 'temporary_break';
-    const shouldEndSession = removalType;
-
-    console.log('[Frontend] About to call API with:', { queueId, reason, shouldEndSession });
+    console.log('[Frontend] Solo removal action:', { queueId, playerName, action, reason, shouldEndSession });
 
     try {
       const response = await fetch('/api/queue/remove', {
@@ -682,10 +690,13 @@ export default function AdminDashboardRedesign() {
         throw new Error(data.error || 'Failed to remove player');
       }
 
+      // Close modal first
+      setSoloRemovalModal({ isOpen: false, queueId: '', playerName: '' });
+
       if (shouldEndSession) {
-        alert(`${data.player_name} removed from queue. Session ended.`);
+        alert(`${playerName} removed from queue. Session ended - they must check in at cashier again.`);
       } else {
-        alert(`${data.player_name} removed from queue. Session still active - they can rejoin when back.`);
+        alert(`${playerName} removed from queue. Session still active - they can scan QR to rejoin.`);
       }
 
       console.log('[Frontend] About to refresh queue');
@@ -694,6 +705,7 @@ export default function AdminDashboardRedesign() {
     } catch (error) {
       console.error('[Frontend] Error removing player:', error);
       alert('Failed to remove player: ' + (error as Error).message);
+      setSoloRemovalModal({ isOpen: false, queueId: '', playerName: '' });
     }
   };
 
@@ -1634,6 +1646,68 @@ export default function AdminDashboardRedesign() {
                     Remove Selected ({groupRemovalModal.selectedIds.size})
                   </Button>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Solo Removal Modal */}
+      {soloRemovalModal.isOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+            <div className="p-6">
+              <h3 className="text-xl font-bold mb-2">Remove {soloRemovalModal.playerName}?</h3>
+              <p className="text-gray-600 text-sm mb-6">
+                Choose what to do with their session:
+              </p>
+
+              <div className="space-y-3">
+                {/* Take a Break Option */}
+                <button
+                  onClick={() => handleSoloRemovalAction('break')}
+                  className="w-full p-4 rounded-lg border-2 border-blue-200 bg-blue-50 hover:bg-blue-100 hover:border-blue-400 transition text-left"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-blue-500 rounded-full">
+                      <Clock className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-blue-900">Take a Break</p>
+                      <p className="text-sm text-blue-700 mt-1">
+                        Remove from queue but keep session active. They can scan their QR code to rejoin when ready.
+                      </p>
+                    </div>
+                  </div>
+                </button>
+
+                {/* End Session Option */}
+                <button
+                  onClick={() => handleSoloRemovalAction('end')}
+                  className="w-full p-4 rounded-lg border-2 border-red-200 bg-red-50 hover:bg-red-100 hover:border-red-400 transition text-left"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-red-500 rounded-full">
+                      <UserX className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-red-900">End Session</p>
+                      <p className="text-sm text-red-700 mt-1">
+                        Player left or no-show. Ends their session completely - they must check in at cashier again.
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              </div>
+
+              <div className="mt-6 pt-4 border-t">
+                <Button
+                  variant="secondary"
+                  onClick={() => setSoloRemovalModal({ isOpen: false, queueId: '', playerName: '' })}
+                  className="w-full"
+                >
+                  Cancel
+                </Button>
               </div>
             </div>
           </div>
