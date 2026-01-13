@@ -170,13 +170,12 @@ export default function RegisterPage() {
               />
 
               <Input
-                label="Photo URL"
+                label="Photo URL (Optional)"
                 type="url"
                 value={formData.photo_url}
                 onChange={(e) => setFormData({ ...formData, photo_url: e.target.value })}
                 error={errors.photo_url}
                 placeholder="https://example.com/photo.jpg"
-                required
               />
 
               <Button type="submit" disabled={loading} className="w-full">
