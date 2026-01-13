@@ -21,6 +21,7 @@ export default function CashierPage() {
   // Solo mode state
   const [qrCode, setQrCode] = useState('');
   const [player, setPlayer] = useState<Player | null>(null);
+  const [foundViaSearch, setFoundViaSearch] = useState(false); // Track if found by name search
 
   // Group mode state
   const [groupMembers, setGroupMembers] = useState<GroupMember[]>([]);
@@ -81,6 +82,7 @@ export default function CashierPage() {
 
       setPlayer(data.player);
       setQrCode(qrCodeValue);
+      setFoundViaSearch(false); // Normal QR scan, not search
 
       // Note: Preferences are no longer used by the matchmaking algorithm
     } catch (error) {
@@ -202,7 +204,8 @@ export default function CashierPage() {
       // Add to group
       await addPlayerToGroup(selectedPlayer.qr_uuid);
     } else {
-      // Set as solo player
+      // Set as solo player - mark as found via search
+      setFoundViaSearch(true);
       await validateQRCodeSolo(selectedPlayer.qr_uuid);
     }
 
@@ -608,22 +611,24 @@ export default function CashierPage() {
                 </div>
               </div>
 
-              {/* QR Code Display - Customer can photograph it */}
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                <h3 className="font-semibold text-green-900 mb-3 text-center">Your QR Code</h3>
-                <div className="flex flex-col items-center gap-3">
-                  <div className="bg-white p-4 rounded-lg shadow-sm">
-                    <img
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${qrCode}`}
-                      alt="QR Code"
-                      className="w-48 h-48"
-                    />
+              {/* QR Code Display - Only show if player was found via name search */}
+              {foundViaSearch && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <h3 className="font-semibold text-green-900 mb-3 text-center">Your QR Code</h3>
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="bg-white p-4 rounded-lg shadow-sm">
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${qrCode}`}
+                        alt="QR Code"
+                        className="w-48 h-48"
+                      />
+                    </div>
+                    <p className="text-sm text-green-800 text-center">
+                      📸 Take a photo of this QR code for next time!
+                    </p>
                   </div>
-                  <p className="text-sm text-green-800 text-center">
-                    📸 Take a photo of this QR code for next time!
-                  </p>
                 </div>
-              </div>
+              )}
 
               {/* Photo Display Preference */}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
