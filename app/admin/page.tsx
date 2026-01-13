@@ -8,7 +8,7 @@ import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { CourtStatus, MatchSuggestion } from '@/types';
 import {
   PlayCircle, CheckCircle, Users, Clock, TrendingUp, BarChart3,
-  UserX, AlertTriangle, ChevronDown, ChevronRight, Zap, Activity, Search, Lock, Unlock, GripVertical
+  UserX, AlertTriangle, ChevronDown, ChevronRight, Zap, Activity, Search, Lock, Unlock, GripVertical, UserPlus
 } from 'lucide-react';
 import { getSkillLevelLabel } from '@/lib/utils/skillLevel';
 import { QRScanner } from '@/components/QRScanner';
@@ -127,6 +127,9 @@ export default function AdminDashboardRedesign() {
   const [sessions, setSessions] = useState<Record<string, any>>({});
   const [scanQrInput, setScanQrInput] = useState('');
   const [scanningQr, setScanningQr] = useState(false);
+  const [nameSearchQuery, setNameSearchQuery] = useState('');
+  const [nameSearchResults, setNameSearchResults] = useState<any[]>([]);
+  const [nameSearchLoading, setNameSearchLoading] = useState(false);
   const [matchCompletionModal, setMatchCompletionModal] = useState<{
     isOpen: boolean;
     courtId: string;
@@ -834,6 +837,62 @@ export default function AdminDashboardRedesign() {
     }
   };
 
+  // Name search functions for adding players to queue
+  const handleNameSearch = async (query: string) => {
+    setNameSearchQuery(query);
+
+    if (query.trim().length < 2) {
+      setNameSearchResults([]);
+      return;
+    }
+
+    setNameSearchLoading(true);
+    try {
+      const response = await fetch(`/api/players/search?name=${encodeURIComponent(query)}`);
+      const data = await response.json();
+
+      if (response.ok) {
+        setNameSearchResults(data);
+      } else {
+        console.error('Search error:', data.error);
+        setNameSearchResults([]);
+      }
+    } catch (error) {
+      console.error('Failed to search:', error);
+      setNameSearchResults([]);
+    } finally {
+      setNameSearchLoading(false);
+    }
+  };
+
+  const selectPlayerFromNameSearch = async (player: any) => {
+    // Use the same logic as handleScanToRejoin but with the player's QR UUID
+    setScanningQr(true);
+    try {
+      const response = await fetch('/api/queue/scan-to-rejoin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ qr_uuid: player.qr_uuid }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        alert(data.error || 'Failed to add player to queue');
+        return;
+      }
+
+      alert(`✓ ${player.name} added to queue at position ${data.queue_position}`);
+      setNameSearchQuery('');
+      setNameSearchResults([]);
+      await fetchQueue();
+    } catch (error) {
+      alert('Failed to add player to queue: ' + (error as Error).message);
+    } finally {
+      setScanningQr(false);
+    }
+  };
+
   const openMatchCompletionModal = (courtId: string) => {
     openMatchCompletionModalWithData(courtId, queueEntries);
   };
@@ -1342,28 +1401,58 @@ export default function AdminDashboardRedesign() {
             }}
           />
 
-          {/* Manual Entry */}
-          <form onSubmit={handleScanToRejoin} className="space-y-2 mt-3">
-            <label className="text-xs text-green-800">Or enter manually:</label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Enter player QR code..."
-                value={scanQrInput}
-                onChange={(e) => setScanQrInput(e.target.value)}
-                className="flex-1 px-3 py-2 text-sm border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                disabled={scanningQr}
-              />
-              <Button
-                type="submit"
-                size="sm"
-                disabled={scanningQr || !scanQrInput.trim()}
-                className="bg-green-600 hover:bg-green-700 text-white"
-              >
-                {scanningQr ? 'Adding...' : 'Add'}
-              </Button>
-            </div>
-          </form>
+          {/* Name Search */}
+          <div className="mt-3 relative">
+            <label className="text-xs text-green-800 flex items-center gap-1 mb-1">
+              <UserPlus className="w-3 h-3" />
+              Or search by name:
+            </label>
+
+            {/* Search Results Dropdown - positioned above */}
+            {nameSearchQuery.length >= 2 && (
+              <div className="absolute z-20 w-full bottom-full mb-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                {nameSearchLoading ? (
+                  <div className="p-3 text-center text-gray-500 text-sm">Searching...</div>
+                ) : nameSearchResults.length > 0 ? (
+                  <div className="divide-y">
+                    {nameSearchResults.map((result) => (
+                      <button
+                        key={result.id}
+                        onClick={() => selectPlayerFromNameSearch(result)}
+                        disabled={scanningQr}
+                        className="w-full p-2 hover:bg-gray-50 flex items-center gap-2 text-left transition-colors disabled:opacity-50"
+                      >
+                        {result.photo_url && (
+                          <img
+                            src={result.photo_url}
+                            alt={result.name}
+                            className="w-8 h-8 rounded-full object-cover"
+                          />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-sm truncate">{result.name}</p>
+                          <p className="text-xs text-gray-600">
+                            {getSkillLevelLabel(result.skill_level)}
+                          </p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-3 text-center text-gray-500 text-sm">No players found</div>
+                )}
+              </div>
+            )}
+
+            <input
+              type="text"
+              placeholder="Type player name..."
+              value={nameSearchQuery}
+              onChange={(e) => handleNameSearch(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+              disabled={scanningQr}
+            />
+          </div>
         </div>
       </div>
       
