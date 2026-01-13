@@ -82,7 +82,6 @@ export default function CashierPage() {
 
       setPlayer(data.player);
       setQrCode(qrCodeValue);
-      setFoundViaSearch(false); // Normal QR scan, not search
 
       // Note: Preferences are no longer used by the matchmaking algorithm
     } catch (error) {
@@ -156,6 +155,7 @@ export default function CashierPage() {
     if (isGroupMode) {
       addPlayerToGroup(qrCodeValue);
     } else {
+      setFoundViaSearch(false); // Normal QR scan, not name search
       validateQRCodeSolo(qrCodeValue);
     }
   };
@@ -167,6 +167,7 @@ export default function CashierPage() {
     if (isGroupMode) {
       addPlayerToGroup(scanValue);
     } else {
+      setFoundViaSearch(false); // Normal QR scan, not name search
       validateQRCodeSolo(scanValue);
     }
   };
