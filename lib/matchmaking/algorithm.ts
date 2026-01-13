@@ -353,6 +353,89 @@ export class MatchmakingEngine {
     return this.generateSingleMatch(courtId, queueEntries, 1);
   }
 
+  /**
+   * Generate a singles (1v1) match suggestion
+   * Used by court officer for edge cases when courts available but not enough players for doubles
+   */
+  async generateSinglesMatch(
+    courtId: string,
+    queueEntries: QueueEntryWithPlayer[]
+  ): Promise<MatchSuggestion | null> {
+    console.log(`[ALGORITHM] Generating singles match for court ${courtId}`);
+
+    // Filter active queue entries
+    const activeQueue = queueEntries.filter(entry => entry.status === 'waiting');
+
+    // Need at least 2 players for singles
+    if (activeQueue.length < 2) {
+      console.log(`[ALGORITHM] Not enough players for singles: ${activeQueue.length} < 2`);
+      return null;
+    }
+
+    // Priority 1: Check for time urgent players
+    const urgentPlayers = await this.getUrgentPlayers(activeQueue);
+    let selectedPlayers: QueueEntryWithPlayer[];
+    let hasUrgentPlayers = false;
+
+    if (urgentPlayers.length > 0) {
+      console.log(`[ALGORITHM] Found ${urgentPlayers.length} urgent players for singles`);
+      // Take up to 2 urgent players, or mix with non-urgent if only 1 urgent
+      if (urgentPlayers.length >= 2) {
+        selectedPlayers = urgentPlayers.slice(0, 2);
+      } else {
+        const nonUrgent = activeQueue.filter(e => !urgentPlayers.some(u => u.player_id === e.player_id));
+        selectedPlayers = [urgentPlayers[0], nonUrgent[0]];
+      }
+      hasUrgentPlayers = true;
+    } else {
+      // Priority 2: Take first 2 players from queue (by position)
+      const sortedQueue = activeQueue.sort((a, b) => a.position - b.position);
+      selectedPlayers = sortedQueue.slice(0, 2);
+    }
+
+    console.log('[ALGORITHM] Singles match players:', selectedPlayers.map(p => p.player?.name));
+
+    return this.createSinglesMatchSuggestion(selectedPlayers, courtId, hasUrgentPlayers);
+  }
+
+  /**
+   * Create a singles match suggestion
+   */
+  private createSinglesMatchSuggestion(
+    players: QueueEntryWithPlayer[],
+    courtId: string,
+    hasUrgentPlayers: boolean
+  ): MatchSuggestion {
+    const factors: MatchFactors = {
+      is_friend_group: false, // Singles matches don't involve groups
+      has_time_urgent_players: hasUrgentPlayers,
+      skill_compatible: true,
+      gender_compatible: true,
+      variety_compliant: true,
+      relaxed_constraints: [],
+    };
+
+    // Priority score
+    let priorityScore = 50;
+    if (hasUrgentPlayers) priorityScore += 100;
+
+    // Extract player objects
+    const extractedPlayers = players.map(p => p.player).filter(p => p && p.id);
+
+    if (extractedPlayers.length !== 2) {
+      console.error('Invalid player data for singles match:', players);
+      throw new Error(`Invalid player data: Expected 2 players for singles, got ${extractedPlayers.length}`);
+    }
+
+    return {
+      players: extractedPlayers,
+      court_id: courtId,
+      match_type: 'singles',
+      priority_score: priorityScore,
+      factors,
+    };
+  }
+
   private async getUrgentPlayers(queue: QueueEntryWithPlayer[]): Promise<QueueEntryWithPlayer[]> {
     // Get players with active sessions < 30 min remaining
     const playerIds = queue.map(e => e.player_id);
@@ -412,6 +495,7 @@ export class MatchmakingEngine {
     return {
       players: extractedPlayers,
       court_id: courtId,
+      match_type: 'doubles',
       priority_score: priorityScore,
       factors,
     };

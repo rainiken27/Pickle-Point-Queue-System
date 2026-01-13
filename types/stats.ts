@@ -24,10 +24,11 @@ export interface PlayerStatsYearly {
 export interface MatchHistory {
   id: string;
   court_id: string;
+  match_type: 'singles' | 'doubles';
   team_a_player_1_id: string;
-  team_a_player_2_id: string;
+  team_a_player_2_id: string | null;
   team_b_player_1_id: string;
-  team_b_player_2_id: string;
+  team_b_player_2_id: string | null;
   team_a_score: number | null;
   team_b_score: number | null;
   winning_team: WinningTeam;
@@ -47,10 +48,11 @@ export interface LeaderboardEntry {
 
 export interface CreateMatchRequest {
   court_id: string;
+  match_type: 'singles' | 'doubles';
   team_a_player_1_id: string;
-  team_a_player_2_id: string;
+  team_a_player_2_id?: string | null;
   team_b_player_1_id: string;
-  team_b_player_2_id: string;
+  team_b_player_2_id?: string | null;
   team_a_score?: number;
   team_b_score?: number;
   winning_team: WinningTeam;

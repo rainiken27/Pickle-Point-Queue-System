@@ -111,6 +111,7 @@ export default function AdminDashboardRedesign() {
   const [matchSuggestions, setMatchSuggestions] = useState<Record<string, MatchSuggestion | null>>({});
   const [verifiedPlayers, setVerifiedPlayers] = useState<Record<string, Set<string>>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({});
+  const [singlesMode, setSinglesMode] = useState<Record<string, boolean>>({});
   const [verifyingCourtId, setVerifyingCourtId] = useState<string | null>(null);
   const [queueSearchTerm, setQueueSearchTerm] = useState('');
   const [groupRemovalModal, setGroupRemovalModal] = useState<{
@@ -130,6 +131,7 @@ export default function AdminDashboardRedesign() {
     isOpen: boolean;
     courtId: string;
     players: any[];
+    matchType: 'singles' | 'doubles';
     teamA: string[];
     teamB: string[];
     teamAScore: number;
@@ -138,6 +140,7 @@ export default function AdminDashboardRedesign() {
     isOpen: false,
     courtId: '',
     players: [],
+    matchType: 'doubles',
     teamA: [],
     teamB: [],
     teamAScore: 0,
@@ -389,6 +392,34 @@ export default function AdminDashboardRedesign() {
     }
   };
 
+  const handleCallNextSingles = async (courtId: string) => {
+    setLoading({ ...loading, [courtId]: true });
+
+    try {
+      const response = await fetch('/api/matchmaking/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ court_id: courtId, match_type: 'singles' }),
+      });
+
+      const data = await response.json();
+
+      if (data.match) {
+        setMatchSuggestions({ ...matchSuggestions, [courtId]: data.match });
+        const playerIds = new Set<string>(data.match.players.map((p: any) => p.id));
+        setVerifiedPlayers({ ...verifiedPlayers, [courtId]: playerIds });
+        setSinglesMode({ ...singlesMode, [courtId]: true });
+        setVerifyingCourtId(courtId);
+      } else {
+        alert(data.reason || 'No players available in queue for singles');
+      }
+    } catch (error) {
+      alert('Failed to generate singles match: ' + (error as Error).message);
+    } finally {
+      setLoading({ ...loading, [courtId]: false });
+    }
+  };
+
   const togglePlayerVerification = (courtId: string, playerId: string) => {
     const verified = verifiedPlayers[courtId] || new Set();
     const newVerified = new Set(verified);
@@ -405,6 +436,7 @@ export default function AdminDashboardRedesign() {
   const handleCancelVerification = (courtId: string) => {
     setMatchSuggestions({ ...matchSuggestions, [courtId]: null });
     setVerifiedPlayers({ ...verifiedPlayers, [courtId]: new Set() });
+    setSinglesMode({ ...singlesMode, [courtId]: false });
     setVerifyingCourtId(null);
   };
 
@@ -454,15 +486,17 @@ export default function AdminDashboardRedesign() {
 
   const handleStartMatch = async (courtId: string, match: MatchSuggestion) => {
     const verified = verifiedPlayers[courtId];
+    const isSingles = match.match_type === 'singles';
+    const expectedPlayers = isSingles ? 2 : 4;
 
-    if (!verified || verified.size !== 4) {
-      alert(`Please verify all 4 players are present (currently ${verified?.size || 0}/4 verified)`);
+    if (!verified || verified.size !== expectedPlayers) {
+      alert(`Please verify all ${expectedPlayers} players are present (currently ${verified?.size || 0}/${expectedPlayers} verified)`);
       return;
     }
 
     try {
-      if (!match.players || match.players.length !== 4) {
-        throw new Error(`Invalid match: Expected 4 players, got ${match.players?.length || 0}`);
+      if (!match.players || match.players.length !== expectedPlayers) {
+        throw new Error(`Invalid match: Expected ${expectedPlayers} players, got ${match.players?.length || 0}`);
       }
 
       const invalidPlayers = match.players.filter(p => !p || !p.id);
@@ -539,6 +573,7 @@ export default function AdminDashboardRedesign() {
 
       setMatchSuggestions({ ...matchSuggestions, [courtId]: null });
       setVerifiedPlayers({ ...verifiedPlayers, [courtId]: new Set() });
+      setSinglesMode({ ...singlesMode, [courtId]: false });
       setVerifyingCourtId(null);
 
       // Refresh queue to get updated status
@@ -838,33 +873,47 @@ export default function AdminDashboardRedesign() {
         allStatuses: entries.map(e => ({ name: e.player?.name, status: e.status, court_id: e.court_id }))
       });
 
-      if (playingOnCourt.length !== 4) {
-        alert(`Expected 4 players on court, found ${playingOnCourt.length}. Players may have expired sessions. Using stored court data if available.`);
-        return;
-      }
-
       playersData = playingOnCourt; // Queue data is already in the right format
     }
 
-    if (playersData.length !== 4) {
-      alert(`Expected 4 players on court, found ${playersData.length}. Cannot complete match.`);
+    // Determine match type based on player count
+    const matchType = playersData.length === 2 ? 'singles' : 'doubles';
+
+    if (playersData.length !== 2 && playersData.length !== 4) {
+      alert(`Expected 2 (singles) or 4 (doubles) players on court, found ${playersData.length}. Cannot complete match.`);
       return;
     }
 
-    console.log(`[Match Completion Debug] Final player data:`, playersData);
+    console.log(`[Match Completion Debug] Final player data:`, playersData, `Match type: ${matchType}`);
 
-    // Auto-assign teams (first 2 to Team A, last 2 to Team B)
+    // Auto-assign teams
     const playerIds = playersData.map((p: any) => p.player_id);
 
-    setMatchCompletionModal({
-      isOpen: true,
-      courtId,
-      players: playersData, // Use the player data we found
-      teamA: [playerIds[0], playerIds[1]],
-      teamB: [playerIds[2], playerIds[3]],
-      teamAScore: 0,
-      teamBScore: 0,
-    });
+    if (matchType === 'singles') {
+      // Singles: 1 player per team
+      setMatchCompletionModal({
+        isOpen: true,
+        courtId,
+        players: playersData,
+        matchType: 'singles',
+        teamA: [playerIds[0]],
+        teamB: [playerIds[1]],
+        teamAScore: 0,
+        teamBScore: 0,
+      });
+    } else {
+      // Doubles: 2 players per team
+      setMatchCompletionModal({
+        isOpen: true,
+        courtId,
+        players: playersData,
+        matchType: 'doubles',
+        teamA: [playerIds[0], playerIds[1]],
+        teamB: [playerIds[2], playerIds[3]],
+        teamAScore: 0,
+        teamBScore: 0,
+      });
+    }
   };
 
   const movePlayerToTeam = (playerId: string, fromTeam: 'A' | 'B') => {
@@ -920,10 +969,12 @@ export default function AdminDashboardRedesign() {
   };
 
   const handleCompleteMatch = async () => {
-    const { courtId, teamA, teamB, teamAScore, teamBScore } = matchCompletionModal;
+    const { courtId, matchType, teamA, teamB, teamAScore, teamBScore } = matchCompletionModal;
 
-    if (teamA.length !== 2 || teamB.length !== 2) {
-      alert('Each team must have exactly 2 players');
+    // Validate team sizes based on match type
+    const expectedSize = matchType === 'singles' ? 1 : 2;
+    if (teamA.length !== expectedSize || teamB.length !== expectedSize) {
+      alert(`Each team must have exactly ${expectedSize} player(s) for ${matchType}`);
       return;
     }
 
@@ -933,10 +984,11 @@ export default function AdminDashboardRedesign() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           court_id: courtId,
+          match_type: matchType,
           team_a_player_1_id: teamA[0],
-          team_a_player_2_id: teamA[1],
+          team_a_player_2_id: teamA[1] || null,
           team_b_player_1_id: teamB[0],
-          team_b_player_2_id: teamB[1],
+          team_b_player_2_id: teamB[1] || null,
           team_a_score: teamAScore,
           team_b_score: teamBScore,
         }),
@@ -962,6 +1014,7 @@ export default function AdminDashboardRedesign() {
         isOpen: false,
         courtId: '',
         players: [],
+        matchType: 'doubles',
         teamA: [],
         teamB: [],
         teamAScore: 0,
@@ -1081,7 +1134,7 @@ export default function AdminDashboardRedesign() {
 
                   <div className="bg-yellow-50 border border-yellow-200 rounded p-2">
                     <p className="text-xs text-yellow-800">
-                      ✓ <strong>{verified.size}/4</strong> players verified
+                      ✓ <strong>{verified.size}/{suggestion.match_type === 'singles' ? 2 : 4}</strong> players verified
                     </p>
                   </div>
 
@@ -1089,14 +1142,14 @@ export default function AdminDashboardRedesign() {
                     <Button
                       size="sm"
                       onClick={() => handleStartMatch(court.id, suggestion)}
-                      disabled={verified.size !== 4}
+                      disabled={verified.size !== (suggestion.match_type === 'singles' ? 2 : 4)}
                       className="w-full"
                     >
                       <CheckCircle className="w-4 h-4 mr-2" />
-                      Start Match ({verified.size}/4)
+                      Start Match ({verified.size}/{suggestion.match_type === 'singles' ? 2 : 4})
                     </Button>
 
-                    {verified.size < 4 && (
+                    {verified.size < (suggestion.match_type === 'singles' ? 2 : 4) && (
                       <Button
                         size="sm"
                         variant="danger"
@@ -1119,15 +1172,26 @@ export default function AdminDashboardRedesign() {
                   </div>
                 </div>
               ) : (
-                <Button
-                  size="sm"
-                  onClick={() => handleCallNext(court.id)}
-                  disabled={loading[court.id] || (verifyingCourtId !== null && verifyingCourtId !== court.id)}
-                  className="w-full"
-                >
-                  <PlayCircle className="w-4 h-4 mr-2" />
-                  {loading[court.id] ? 'Loading...' : verifyingCourtId && verifyingCourtId !== court.id ? 'Verifying Other Court...' : 'Call Next'}
-                </Button>
+                <div className="space-y-2">
+                  <Button
+                    size="sm"
+                    onClick={() => handleCallNext(court.id)}
+                    disabled={loading[court.id] || (verifyingCourtId !== null && verifyingCourtId !== court.id)}
+                    className="w-full"
+                  >
+                    <PlayCircle className="w-4 h-4 mr-2" />
+                    {loading[court.id] ? 'Loading...' : verifyingCourtId && verifyingCourtId !== court.id ? 'Verifying Other Court...' : 'Call Doubles'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => handleCallNextSingles(court.id)}
+                    disabled={loading[court.id] || (verifyingCourtId !== null && verifyingCourtId !== court.id) || queueEntries.length < 2}
+                    className="w-full bg-purple-600 hover:bg-purple-700 text-white"
+                  >
+                    <PlayCircle className="w-4 h-4 mr-2" />
+                    Call Singles
+                  </Button>
+                </div>
               )}
             </div>
           ) : isReserved ? (
@@ -1611,6 +1675,7 @@ export default function AdminDashboardRedesign() {
                       isOpen: false,
                       courtId: '',
                       players: [],
+                      matchType: 'doubles',
                       teamA: [],
                       teamB: [],
                       teamAScore: 0,

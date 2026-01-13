@@ -5,12 +5,13 @@ import { z } from 'zod';
 
 const MatchmakingRequestSchema = z.object({
   court_id: z.string().uuid(),
+  match_type: z.enum(['singles', 'doubles']).optional().default('doubles'),
 });
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { court_id } = MatchmakingRequestSchema.parse(body);
+    const { court_id, match_type } = MatchmakingRequestSchema.parse(body);
 
     // Fetch current queue (single facility - no building filter)
     const { data: queueData, error: queueError } = await supabaseServer
@@ -24,28 +25,36 @@ export async function POST(request: NextRequest) {
 
     if (queueError) throw queueError;
 
-    console.log(`[MATCHMAKING] ${queueData?.length || 0} waiting players in queue`);
+    console.log(`[MATCHMAKING] ${queueData?.length || 0} waiting players in queue, match_type: ${match_type}`);
 
-    // Fetch available courts to enable multi-court optimization
-    const { data: courtsData, error: courtsError } = await supabaseServer
-      .from('courts')
-      .select('id')
-      .eq('status', 'available')
-      .order('court_number', { ascending: true });
+    let match;
 
-    if (courtsError) throw courtsError;
+    if (match_type === 'singles') {
+      // Generate singles (1v1) match
+      match = await matchmakingEngine.generateSinglesMatch(court_id, queueData || []);
+    } else {
+      // Generate doubles (2v2) match using multi-court algorithm
+      // Fetch available courts to enable multi-court optimization
+      const { data: courtsData, error: courtsError } = await supabaseServer
+        .from('courts')
+        .select('id')
+        .eq('status', 'available')
+        .order('court_number', { ascending: true });
 
-    const availableCourts = courtsData?.map(c => c.id) || [];
-    console.log(`[MATCHMAKING] ${availableCourts.length} available courts`);
+      if (courtsError) throw courtsError;
 
-    // Use new multi-court algorithm for better group efficiency
-    const matches = await matchmakingEngine.generateMatches(
-      availableCourts,
-      queueData || []
-    );
+      const availableCourts = courtsData?.map(c => c.id) || [];
+      console.log(`[MATCHMAKING] ${availableCourts.length} available courts`);
 
-    // Find the match for the requested court (or return the first match)
-    const match = matches.find(m => m.court_id === court_id) || matches[0] || null;
+      // Use new multi-court algorithm for better group efficiency
+      const matches = await matchmakingEngine.generateMatches(
+        availableCourts,
+        queueData || []
+      );
+
+      // Find the match for the requested court (or return the first match)
+      match = matches.find(m => m.court_id === court_id) || matches[0] || null;
+    }
 
     if (!match) {
       return NextResponse.json(

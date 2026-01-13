@@ -4,10 +4,11 @@ import { z } from 'zod';
 
 const CompleteMatchSchema = z.object({
   court_id: z.string().uuid(),
+  match_type: z.enum(['singles', 'doubles']).optional().default('doubles'),
   team_a_player_1_id: z.string().uuid(),
-  team_a_player_2_id: z.string().uuid(),
+  team_a_player_2_id: z.string().uuid().optional().nullable(),
   team_b_player_1_id: z.string().uuid(),
-  team_b_player_2_id: z.string().uuid(),
+  team_b_player_2_id: z.string().uuid().optional().nullable(),
   team_a_score: z.number().int().min(0).nullable().optional(),
   team_b_score: z.number().int().min(0).nullable().optional(),
 });
@@ -21,6 +22,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const {
       court_id,
+      match_type,
       team_a_player_1_id,
       team_a_player_2_id,
       team_b_player_1_id,
@@ -28,6 +30,23 @@ export async function POST(request: NextRequest) {
       team_a_score,
       team_b_score,
     } = CompleteMatchSchema.parse(body);
+
+    // Validate player counts based on match type
+    if (match_type === 'singles') {
+      if (team_a_player_2_id || team_b_player_2_id) {
+        return NextResponse.json(
+          { error: 'Singles matches should only have 2 players total' },
+          { status: 400 }
+        );
+      }
+    } else {
+      if (!team_a_player_2_id || !team_b_player_2_id) {
+        return NextResponse.json(
+          { error: 'Doubles matches require 4 players' },
+          { status: 400 }
+        );
+      }
+    }
 
     // Determine winning team based on scores
     let winning_team: 'team_a' | 'team_b' | 'tie' | 'incomplete' = 'incomplete';
@@ -82,7 +101,7 @@ export async function POST(request: NextRequest) {
       team_a_player_2_id,
       team_b_player_1_id,
       team_b_player_2_id,
-    ];
+    ].filter(id => id !== null && id !== undefined);
 
     const { error: queueError } = await supabaseServer
       .from('queue')
@@ -102,7 +121,7 @@ export async function POST(request: NextRequest) {
         message: 'Match completed and stats updated',
         match_id: result?.match_id,
         winning_team,
-        players_updated: 4,
+        players_updated: playerIds.length,
       },
       { status: 200 }
     );

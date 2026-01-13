@@ -4,6 +4,7 @@ import { QueueEntryWithPlayer } from './queue';
 export interface MatchSuggestion {
   players: Player[];
   court_id: string;
+  match_type: 'singles' | 'doubles';
   priority_score: number;
   factors: MatchFactors;
 }
@@ -19,6 +20,7 @@ export interface MatchFactors {
 
 export interface MatchmakingRequest {
   court_id: string;
+  match_type?: 'singles' | 'doubles';
 }
 
 export interface MatchmakingResult {
