@@ -26,6 +26,11 @@ export default function CashierPage() {
   const [groupMembers, setGroupMembers] = useState<GroupMember[]>([]);
   const [currentScanQr, setCurrentScanQr] = useState('');
 
+  // Name search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Player[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+
   // Shared state
   const [preferences] = useState<Partial<PlayerPreferences>>({
     skill_level_pref: 'beginner', // Default value, not used by algorithm
@@ -162,6 +167,48 @@ export default function CashierPage() {
     } else {
       validateQRCodeSolo(scanValue);
     }
+  };
+
+  // Name search functions
+  const handleNameSearch = async (query: string) => {
+    setSearchQuery(query);
+
+    if (query.trim().length < 2) {
+      setSearchResults([]);
+      return;
+    }
+
+    setSearchLoading(true);
+    try {
+      const response = await fetch(`/api/players/search?name=${encodeURIComponent(query)}`);
+      const data = await response.json();
+
+      if (response.ok) {
+        setSearchResults(data);
+      } else {
+        console.error('Search error:', data.error);
+        setSearchResults([]);
+      }
+    } catch (error) {
+      console.error('Failed to search:', error);
+      setSearchResults([]);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const selectPlayerFromSearch = async (selectedPlayer: Player) => {
+    if (isGroupMode) {
+      // Add to group
+      await addPlayerToGroup(selectedPlayer.qr_uuid);
+    } else {
+      // Set as solo player
+      await validateQRCodeSolo(selectedPlayer.qr_uuid);
+    }
+
+    // Clear search
+    setSearchQuery('');
+    setSearchResults([]);
   };
 
   // Solo mode: Start session for one player
@@ -425,6 +472,64 @@ export default function CashierPage() {
                   </Button>
                 </div>
               </div>
+
+              {/* Divider */}
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-300"></div>
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="px-2 bg-white text-gray-500">OR</span>
+                </div>
+              </div>
+
+              {/* Name Search */}
+              <div className="space-y-2 relative">
+                <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                  <UserPlus className="w-4 h-4" />
+                  Search by Name (if QR code forgotten)
+                </label>
+                <Input
+                  placeholder="Type player name..."
+                  value={searchQuery}
+                  onChange={(e) => handleNameSearch(e.target.value)}
+                />
+
+                {/* Search Results Dropdown */}
+                {searchQuery.length >= 2 && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-80 overflow-y-auto">
+                    {searchLoading ? (
+                      <div className="p-4 text-center text-gray-500">Searching...</div>
+                    ) : searchResults.length > 0 ? (
+                      <div className="divide-y">
+                        {searchResults.map((result) => (
+                          <button
+                            key={result.id}
+                            onClick={() => selectPlayerFromSearch(result)}
+                            className="w-full p-3 hover:bg-gray-50 flex items-center gap-3 text-left transition-colors"
+                          >
+                            {result.photo_url && (
+                              <img
+                                src={result.photo_url}
+                                alt={result.name}
+                                className="w-12 h-12 rounded-full object-cover"
+                              />
+                            )}
+                            <div className="flex-1">
+                              <p className="font-semibold">{result.name}</p>
+                              <p className="text-sm text-gray-600">
+                                {getSkillLevelLabel(result.skill_level)} • ID: #{result.id.slice(0, 8)}
+                              </p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-4 text-center text-gray-500">No players found</div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </CardBody>
         </Card>
@@ -499,6 +604,23 @@ export default function CashierPage() {
                   <p className="text-2xl font-bold">{player.name}</p>
                   <p className="text-gray-600">
                     {getSkillLevelLabel(player.skill_level)}
+                  </p>
+                </div>
+              </div>
+
+              {/* QR Code Display - Customer can photograph it */}
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <h3 className="font-semibold text-green-900 mb-3 text-center">Your QR Code</h3>
+                <div className="flex flex-col items-center gap-3">
+                  <div className="bg-white p-4 rounded-lg shadow-sm">
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${qrCode}`}
+                      alt="QR Code"
+                      className="w-48 h-48"
+                    />
+                  </div>
+                  <p className="text-sm text-green-800 text-center">
+                    📸 Take a photo of this QR code for next time!
                   </p>
                 </div>
               </div>
