@@ -47,8 +47,8 @@ export function QRScanner({ onScan, onError }: QRScannerProps) {
         (decodedText) => {
           // QR code scanned successfully
           onScan(decodedText);
-          // Just hide the UI - scanner will clean up on unmount
-          setIsScanning(false);
+          // Stop the scanner to prevent multiple scans of the same QR code
+          stopScanning();
         },
         (errorMessage) => {
           // Scanning error (not a critical error, just means no QR detected in frame)
