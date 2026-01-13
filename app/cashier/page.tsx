@@ -39,7 +39,7 @@ export default function CashierPage() {
   const [isRejoining, setIsRejoining] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<string>('');
 
-  const { addToQueue, queueEntries } = useStore();
+  const addToQueue = useStore((state) => state.addToQueue);
 
   // Solo mode: Validate and set single player
   const validateQRCodeSolo = async (qrCodeValue: string) => {
@@ -60,8 +60,11 @@ export default function CashierPage() {
 
       // Check if player already has an active session and is in queue
       if (data.player.active_session) {
-        const isInQueue = queueEntries.some(
-          entry => entry.player_id === data.player.id && entry.status === 'waiting'
+        // Fetch current queue to check if player is already in it
+        const queueResponse = await fetch('/api/queue');
+        const queueData = await queueResponse.json();
+        const isInQueue = queueData.some(
+          (entry: any) => entry.player_id === data.player.id && entry.status === 'waiting'
         );
 
         if (isInQueue) {
@@ -115,8 +118,11 @@ export default function CashierPage() {
 
       // Check if player already has an active session and is in queue
       if (data.player.active_session) {
-        const isInQueue = queueEntries.some(
-          entry => entry.player_id === data.player.id && entry.status === 'waiting'
+        // Fetch current queue to check if player is already in it
+        const queueResponse = await fetch('/api/queue');
+        const queueData = await queueResponse.json();
+        const isInQueue = queueData.some(
+          (entry: any) => entry.player_id === data.player.id && entry.status === 'waiting'
         );
 
         if (isInQueue) {
