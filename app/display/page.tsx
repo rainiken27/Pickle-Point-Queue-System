@@ -266,9 +266,9 @@ export default function TVDisplay() {
 
 
       {/* Main Content - Courts and Queue */}
-      <div className="grid grid-cols-3 gap-4 flex-1 min-h-0">
-        {/* Courts - Takes 2/3 width */}
-        <div className="col-span-2 bg-black/25 backdrop-blur-md p-4 rounded-lg border border-white/10">
+      <div className="grid gap-4 flex-1 min-h-0" style={{ gridTemplateColumns: '55% 45%' }}>
+        {/* Courts - Takes 55% width */}
+        <div className="bg-black/25 backdrop-blur-md p-4 rounded-lg border border-white/10">
           <h3 className="text-2xl font-semibold text-white/90 mb-4">Courts</h3>
           <div className="grid grid-cols-2 gap-3">
             {courts.slice(0, 6).map(court => {
@@ -335,7 +335,7 @@ export default function TVDisplay() {
           </div>
         </div>
 
-        {/* Queue - Takes 1/3 width */}
+        {/* Queue - Takes 45% width */}
         <div className="bg-black/25 backdrop-blur-md p-4 rounded-lg border border-white/10 flex flex-col min-h-0">
           <h3 className="text-3xl font-semibold text-white mb-4 flex items-center gap-2 shrink-0">
             <Users className="w-10 h-10" />
