@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase/client';
 import { Player } from '@/types';
 import { Trophy, Users, Clock, Target } from 'lucide-react';
 import { skillLevelToPreferenceGroup } from '@/lib/utils/skillLevel';
+import { ImageWithFallback } from '@/components/ui/ImageWithFallback';
 
 interface PlayerStats {
   totalGames: number;
@@ -139,13 +140,12 @@ export default function PlayerStatsPage() {
         <Card>
           <CardBody>
             <div className="flex items-center gap-6">
-              {player.photo_url && (
-                <img
-                  src={player.photo_url}
-                  alt={player.name}
-                  className="w-24 h-24 rounded-full object-cover"
-                />
-              )}
+              <ImageWithFallback
+                src={player.photo_url}
+                alt={player.name}
+                name={player.name}
+                className="w-24 h-24 rounded-full object-cover"
+              />
               <div>
                 <h1 className="text-4xl font-bold">{player.name}</h1>
                 <p className="text-xl text-gray-600">

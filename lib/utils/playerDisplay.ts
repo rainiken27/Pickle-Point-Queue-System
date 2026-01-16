@@ -15,6 +15,15 @@ export function getPlayerInitials(name: string): string {
 }
 
 /**
+ * Generate a DiceBear avatar URL based on player name
+ * Uses the "initials" style for a clean, professional look
+ */
+export function getDiceBearAvatarUrl(name: string): string {
+  const encodedName = encodeURIComponent(name);
+  return `https://api.dicebear.com/7.x/initials/svg?seed=${encodedName}&backgroundColor=6366f1,8b5cf6,ec4899,f59e0b,10b981&backgroundType=gradientLinear`;
+}
+
+/**
  * Component props for player avatar display
  */
 export interface PlayerAvatarProps {

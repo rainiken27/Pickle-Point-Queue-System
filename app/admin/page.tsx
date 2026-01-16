@@ -13,6 +13,7 @@ import {
 import { getSkillLevelLabel } from '@/lib/utils/skillLevel';
 import { QRScanner } from '@/components/QRScanner';
 import { PlayerAvatar } from '@/components/ui/PlayerAvatar';
+import { ImageWithFallback } from '@/components/ui/ImageWithFallback';
 import {
   DndContext,
   closestCenter,
@@ -1434,13 +1435,12 @@ export default function AdminDashboardRedesign() {
                         disabled={scanningQr}
                         className="w-full p-2 hover:bg-gray-50 flex items-center gap-2 text-left transition-colors disabled:opacity-50"
                       >
-                        {result.photo_url && (
-                          <img
-                            src={result.photo_url}
-                            alt={result.name}
-                            className="w-8 h-8 rounded-full object-cover"
-                          />
-                        )}
+                        <ImageWithFallback
+                          src={result.photo_url}
+                          alt={result.name}
+                          name={result.name}
+                          className="w-8 h-8 rounded-full object-cover"
+                        />
                         <div className="flex-1 min-w-0">
                           <p className="font-semibold text-sm truncate">{result.name}</p>
                           <p className="text-xs text-gray-600">

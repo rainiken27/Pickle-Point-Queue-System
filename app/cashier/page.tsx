@@ -9,6 +9,7 @@ import { useStore } from '@/store';
 import { Player, PlayerPreferences } from '@/types';
 import { Scan, Users, Clock, Keyboard, UserPlus, X, Check } from 'lucide-react';
 import { getSkillLevelLabel } from '@/lib/utils/skillLevel';
+import { ImageWithFallback } from '@/components/ui/ImageWithFallback';
 
 interface GroupMember extends Player {
   qr_uuid_used: string;
@@ -512,13 +513,12 @@ export default function CashierPage() {
                             onClick={() => selectPlayerFromSearch(result)}
                             className="w-full p-3 hover:bg-gray-50 flex items-center gap-3 text-left transition-colors"
                           >
-                            {result.photo_url && (
-                              <img
-                                src={result.photo_url}
-                                alt={result.name}
-                                className="w-12 h-12 rounded-full object-cover"
-                              />
-                            )}
+                            <ImageWithFallback
+                              src={result.photo_url}
+                              alt={result.name}
+                              name={result.name}
+                              className="w-12 h-12 rounded-full object-cover"
+                            />
                             <div className="flex-1">
                               <p className="font-semibold">{result.name}</p>
                               <p className="text-sm text-gray-600">
@@ -555,13 +555,12 @@ export default function CashierPage() {
                       <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center font-bold text-blue-600">
                         {index + 1}
                       </div>
-                      {member.photo_url && (
-                        <img
-                          src={member.photo_url}
-                          alt={member.name}
-                          className="w-12 h-12 rounded-full object-cover"
-                        />
-                      )}
+                      <ImageWithFallback
+                        src={member.photo_url}
+                        alt={member.name}
+                        name={member.name}
+                        className="w-12 h-12 rounded-full object-cover"
+                      />
                       <div>
                         <p className="font-semibold">{member.name}</p>
                         <p className="text-sm text-gray-600">
@@ -597,13 +596,12 @@ export default function CashierPage() {
             </CardHeader>
             <CardBody className="space-y-6">
               <div className="flex items-center gap-4">
-                {player.photo_url && (
-                  <img
-                    src={player.photo_url}
-                    alt={player.name}
-                    className="w-20 h-20 rounded-full object-cover"
-                  />
-                )}
+                <ImageWithFallback
+                  src={player.photo_url}
+                  alt={player.name}
+                  name={player.name}
+                  className="w-20 h-20 rounded-full object-cover"
+                />
                 <div>
                   <p className="text-2xl font-bold">{player.name}</p>
                   <p className="text-gray-600">
@@ -644,13 +642,12 @@ export default function CashierPage() {
                       className="w-4 h-4 text-blue-600"
                     />
                     <div className="flex items-center gap-2">
-                      {player.photo_url && (
-                        <img
-                          src={player.photo_url}
-                          alt={player.name}
-                          className="w-8 h-8 rounded-full object-cover"
-                        />
-                      )}
+                      <ImageWithFallback
+                        src={player.photo_url}
+                        alt={player.name}
+                        name={player.name}
+                        className="w-8 h-8 rounded-full object-cover"
+                      />
                       <span>Show my photo on displays</span>
                     </div>
                   </label>
@@ -719,11 +716,12 @@ export default function CashierPage() {
                     />
                     <div className="flex items-center gap-2">
                       <div className="flex -space-x-2">
-                        {groupMembers.slice(0, 3).map((member, idx) => (
-                          <img
+                        {groupMembers.slice(0, 3).map((member) => (
+                          <ImageWithFallback
                             key={member.id}
-                            src={member.photo_url || '/logo.png'}
+                            src={member.photo_url}
                             alt={member.name}
+                            name={member.name}
                             className="w-8 h-8 rounded-full object-cover border-2 border-white"
                           />
                         ))}

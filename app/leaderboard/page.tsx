@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { Trophy, Medal, Award, ArrowLeft } from 'lucide-react';
 import { LeaderboardEntry } from '@/types/stats';
+import { ImageWithFallback } from '@/components/ui/ImageWithFallback';
 
 export default function LeaderboardPage() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
@@ -113,17 +114,12 @@ export default function LeaderboardPage() {
 
                       {/* Player Photo */}
                       <div className="w-12 h-12 rounded-full overflow-hidden bg-white/10 shrink-0 border-2 border-white/20">
-                        {entry.photo_url ? (
-                          <img
-                            src={entry.photo_url}
-                            alt={entry.player_name}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-lg font-bold text-white">
-                            {entry.player_name.charAt(0).toUpperCase()}
-                          </div>
-                        )}
+                        <ImageWithFallback
+                          src={entry.photo_url}
+                          alt={entry.player_name}
+                          name={entry.player_name}
+                          className="w-full h-full object-cover"
+                        />
                       </div>
 
                       {/* Player Info */}
@@ -165,17 +161,12 @@ export default function LeaderboardPage() {
 
                       {/* Player Photo */}
                       <div className="w-12 h-12 rounded-full overflow-hidden bg-white/10 shrink-0 border-2 border-white/20">
-                        {entry.photo_url ? (
-                          <img
-                            src={entry.photo_url}
-                            alt={entry.player_name}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-lg font-bold text-white">
-                            {entry.player_name.charAt(0).toUpperCase()}
-                          </div>
-                        )}
+                        <ImageWithFallback
+                          src={entry.photo_url}
+                          alt={entry.player_name}
+                          name={entry.player_name}
+                          className="w-full h-full object-cover"
+                        />
                       </div>
 
                       {/* Player Info */}
