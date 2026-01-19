@@ -71,8 +71,8 @@ function SortableQueueItem({ entry, countdown, onRemove }: any) {
             className="shrink-0"
           />
           
-          <div className="flex-1 min-w-0">
-            <p className="font-semibold text-sm truncate">{entry.player.name}</p>
+          <div className="flex-1 min-w-0 max-w-[120px]">
+            <p className="font-semibold text-sm truncate" title={entry.player.name}>{entry.player.name}</p>
             <p className="text-xs text-gray-500">
               {getSkillLevelLabel(entry.player.skill_level)}
               {entry.group_id ? ` • ${(entry as any).group?.name || 'Group'}` : ' • Solo'}

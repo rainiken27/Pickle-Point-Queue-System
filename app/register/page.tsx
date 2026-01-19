@@ -5,7 +5,8 @@ import QRCode from 'react-qr-code';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
-import { Users } from 'lucide-react';
+import { PhotoCapture } from '@/components/PhotoCapture';
+import { Users, Link, Camera } from 'lucide-react';
 
 export default function RegisterPage() {
   const [formData, setFormData] = useState({
@@ -18,6 +19,7 @@ export default function RegisterPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [generatedQR, setGeneratedQR] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [photoMode, setPhotoMode] = useState<'url' | 'camera'>('camera');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -169,14 +171,81 @@ export default function RegisterPage() {
                 ]}
               />
 
-              <Input
-                label="Photo URL (Optional)"
-                type="url"
-                value={formData.photo_url}
-                onChange={(e) => setFormData({ ...formData, photo_url: e.target.value })}
-                error={errors.photo_url}
-                placeholder="https://example.com/photo.jpg"
-              />
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Photo (Optional)
+                  </label>
+                  <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+                    <button
+                      type="button"
+                      onClick={() => setPhotoMode('camera')}
+                      className={`flex items-center gap-1 px-3 py-1 text-sm rounded-md transition-colors ${
+                        photoMode === 'camera'
+                          ? 'bg-white shadow text-blue-600'
+                          : 'text-gray-600 hover:text-gray-800'
+                      }`}
+                    >
+                      <Camera className="w-4 h-4" />
+                      Camera
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPhotoMode('url')}
+                      className={`flex items-center gap-1 px-3 py-1 text-sm rounded-md transition-colors ${
+                        photoMode === 'url'
+                          ? 'bg-white shadow text-blue-600'
+                          : 'text-gray-600 hover:text-gray-800'
+                      }`}
+                    >
+                      <Link className="w-4 h-4" />
+                      URL
+                    </button>
+                  </div>
+                </div>
+
+                {photoMode === 'camera' ? (
+                  <div>
+                    {formData.photo_url ? (
+                      <div className="space-y-2">
+                        <div className="relative w-32 h-32 mx-auto">
+                          <img
+                            src={formData.photo_url}
+                            alt="Profile preview"
+                            className="w-full h-full object-cover rounded-lg border-2 border-green-500"
+                          />
+                        </div>
+                        <p className="text-sm text-green-600 text-center">Photo captured!</p>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => setFormData({ ...formData, photo_url: '' })}
+                          className="w-full"
+                        >
+                          Remove & Retake
+                        </Button>
+                      </div>
+                    ) : (
+                      <PhotoCapture
+                        onCapture={(url) => setFormData({ ...formData, photo_url: url })}
+                        onError={(error) => setErrors({ ...errors, photo_url: error })}
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <Input
+                    type="url"
+                    value={formData.photo_url}
+                    onChange={(e) => setFormData({ ...formData, photo_url: e.target.value })}
+                    error={errors.photo_url}
+                    placeholder="https://example.com/photo.jpg"
+                  />
+                )}
+
+                <p className="text-xs text-gray-500">
+                  If no photo is provided, your initials will be displayed instead.
+                </p>
+              </div>
 
               <Button type="submit" disabled={loading} className="w-full">
                 {loading ? 'Registering...' : 'Register & Generate QR Code'}
