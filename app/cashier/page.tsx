@@ -5,9 +5,10 @@ import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { QRScanner } from '@/components/QRScanner';
+import { ReceiptCapture } from '@/components/ReceiptCapture';
 import { useStore } from '@/store';
 import { Player, PlayerPreferences } from '@/types';
-import { Scan, Users, Clock, Keyboard, UserPlus, X, Check } from 'lucide-react';
+import { Scan, Users, Clock, Keyboard, UserPlus, X, Check, Receipt } from 'lucide-react';
 import { getSkillLevelLabel } from '@/lib/utils/skillLevel';
 import { ImageWithFallback } from '@/components/ui/ImageWithFallback';
 
@@ -45,6 +46,11 @@ export default function CashierPage() {
   const [successMessage, setSuccessMessage] = useState('');
   const [isRejoining, setIsRejoining] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<string>('');
+
+  // Receipt capture state
+  const [receiptImage, setReceiptImage] = useState<string | null>(null);
+  const [receiptType, setReceiptType] = useState<'physical' | 'gcash' | 'other'>('physical');
+  const [uploadingReceipt, setUploadingReceipt] = useState(false);
 
   const addToQueue = useStore((state) => state.addToQueue);
 
@@ -220,6 +226,12 @@ export default function CashierPage() {
   const handleStartSession = async () => {
     if (!player) return;
 
+    // Require receipt capture before starting session
+    if (!receiptImage) {
+      alert('Please capture a receipt photo before starting the session.');
+      return;
+    }
+
     setLoading(true);
     try {
       // Start 5-hour session (or rejoin existing session) with preferences
@@ -242,9 +254,37 @@ export default function CashierPage() {
       const sessionData = await sessionResponse.json();
       const rejoining = sessionData.rejoining || false;
       const timeRemainingFormatted = sessionData.time_remaining?.formatted || '';
+      const sessionId = sessionData.session?.id;
 
       setIsRejoining(rejoining);
       setTimeRemaining(timeRemainingFormatted);
+
+      // Upload receipt with session ID
+      if (receiptImage && sessionId) {
+        setUploadingReceipt(true);
+        try {
+          const receiptBlob = await fetch(receiptImage).then(r => r.blob());
+          const formData = new FormData();
+          formData.append('receipt', receiptBlob, `receipt-${Date.now()}.jpg`);
+          formData.append('sessionId', sessionId);
+          formData.append('playerId', player.id);
+          formData.append('receiptType', receiptType);
+
+          const receiptResponse = await fetch('/api/receipts/upload', {
+            method: 'POST',
+            body: formData,
+          });
+
+          if (!receiptResponse.ok) {
+            console.error('Failed to upload receipt:', await receiptResponse.json());
+            // Don't block check-in if receipt upload fails, but log it
+          }
+        } catch (receiptError) {
+          console.error('Receipt upload error:', receiptError);
+        } finally {
+          setUploadingReceipt(false);
+        }
+      }
 
       // Add to queue (no group_id for solo)
       await addToQueue({
@@ -266,6 +306,8 @@ export default function CashierPage() {
         setSuccessMessage('');
         setIsRejoining(false);
         setTimeRemaining('');
+        setReceiptImage(null);
+        setReceiptType('physical');
       }, 3000);
     } catch (error) {
       alert('Failed to start session: ' + (error as Error).message);
@@ -629,6 +671,71 @@ export default function CashierPage() {
                 </div>
               )}
 
+              {/* Receipt Capture Section */}
+              <div className="border-2 border-orange-200 bg-orange-50 rounded-lg p-4">
+                <h3 className="font-semibold text-orange-900 mb-3 flex items-center gap-2">
+                  <Receipt className="w-5 h-5" />
+                  Payment Receipt (Required)
+                </h3>
+
+                {/* Receipt Type Selection */}
+                <div className="mb-4">
+                  <label className="text-sm font-medium text-gray-700 mb-2 block">Receipt Type</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setReceiptType('physical')}
+                      className={`flex-1 py-2 px-4 rounded-lg border-2 transition-colors ${
+                        receiptType === 'physical'
+                          ? 'border-orange-500 bg-orange-100 text-orange-800'
+                          : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                      }`}
+                    >
+                      Physical Receipt
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReceiptType('gcash')}
+                      className={`flex-1 py-2 px-4 rounded-lg border-2 transition-colors ${
+                        receiptType === 'gcash'
+                          ? 'border-orange-500 bg-orange-100 text-orange-800'
+                          : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                      }`}
+                    >
+                      GCash Screenshot
+                    </button>
+                  </div>
+                </div>
+
+                {/* Receipt Capture or Preview */}
+                {receiptImage ? (
+                  <div className="space-y-3">
+                    <div className="border-2 border-green-500 rounded-lg overflow-hidden">
+                      <img src={receiptImage} alt="Captured receipt" className="w-full max-h-64 object-contain bg-white" />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-green-700 font-medium flex items-center gap-1">
+                        <Check className="w-4 h-4" />
+                        Receipt captured
+                      </span>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setReceiptImage(null)}
+                      >
+                        Retake
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <ReceiptCapture
+                    onCapture={(imageDataUrl) => setReceiptImage(imageDataUrl)}
+                    onError={(error) => console.error('Receipt capture error:', error)}
+                  />
+                )}
+              </div>
+
               {/* Photo Display Preference */}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <h3 className="font-semibold text-blue-900 mb-3">Display Preference</h3>
@@ -671,12 +778,16 @@ export default function CashierPage() {
 
               <Button
                 onClick={handleStartSession}
-                disabled={loading}
+                disabled={loading || !receiptImage}
                 className="w-full"
                 size="lg"
               >
                 <Clock className="w-5 h-5 mr-2" />
-                {loading ? 'Starting...' : 'Start 5-Hour Session & Add to Queue'}
+                {loading
+                  ? (uploadingReceipt ? 'Uploading receipt...' : 'Starting...')
+                  : !receiptImage
+                    ? 'Capture Receipt First'
+                    : 'Start 5-Hour Session & Add to Queue'}
               </Button>
             </CardBody>
           </Card>
