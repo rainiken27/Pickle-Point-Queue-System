@@ -344,13 +344,15 @@ export class MatchmakingEngine {
   }
 
   /**
-   * Generate a match suggestion for a specific court (legacy method for backward compatibility)
+   * Generate a match suggestion for a specific court.
+   * Always returns the first group from the queue regardless of which court is requested.
    */
   async generateMatch(
     courtId: string,
-    queueEntries: QueueEntryWithPlayer[]
+    queueEntries: QueueEntryWithPlayer[],
+    availableCourts: number = 1
   ): Promise<MatchSuggestion | null> {
-    return this.generateSingleMatch(courtId, queueEntries, 1);
+    return this.generateSingleMatch(courtId, queueEntries, availableCourts);
   }
 
   /**

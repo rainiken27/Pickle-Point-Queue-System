@@ -33,27 +33,16 @@ export async function POST(request: NextRequest) {
       // Generate singles (1v1) match
       match = await matchmakingEngine.generateSinglesMatch(court_id, queueData || []);
     } else {
-      // Generate doubles (2v2) match using multi-court algorithm
-      // Fetch available courts to enable multi-court optimization
-      const { data: courtsData, error: courtsError } = await supabaseServer
+      // Generate doubles (2v2) match - always call the first group from the queue
+      // Fetch available court count so group optimization knows if groups can jump ahead
+      const { count: availableCourtCount, error: courtsError } = await supabaseServer
         .from('courts')
-        .select('id')
-        .eq('status', 'available')
-        .order('court_number', { ascending: true });
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'available');
 
       if (courtsError) throw courtsError;
 
-      const availableCourts = courtsData?.map(c => c.id) || [];
-      console.log(`[MATCHMAKING] ${availableCourts.length} available courts`);
-
-      // Use new multi-court algorithm for better group efficiency
-      const matches = await matchmakingEngine.generateMatches(
-        availableCourts,
-        queueData || []
-      );
-
-      // Find the match for the requested court (or return the first match)
-      match = matches.find(m => m.court_id === court_id) || matches[0] || null;
+      match = await matchmakingEngine.generateMatch(court_id, queueData || [], availableCourtCount || 1);
     }
 
     if (!match) {

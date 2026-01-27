@@ -19,128 +19,192 @@ interface DisplayUnit {
   groupName?: string;
 }
 
-// Function to create display units (matchable groups for visual display)
-// This mirrors the matchmaking algorithm's logic for visual consistency
-function createDisplayUnits(queueEntries: QueueEntryWithPlayer[]): DisplayUnit[] {
+// Mirrors the matchmaking algorithm's logic so the display order matches who gets called next.
+// Groups can jump ahead if there are enough courts for the solos ahead of them.
+function createDisplayUnits(queueEntries: QueueEntryWithPlayer[], availableCourtCount: number): DisplayUnit[] {
   const units: DisplayUnit[] = [];
-  const processedPlayerIds = new Set<string>();
+  let remainingQueue = [...queueEntries]
+    .filter(entry => entry.status === 'waiting')
+    .sort((a, b) => a.position - b.position);
 
-  // Sort by position to process in queue order
-  const sortedEntries = [...queueEntries].sort((a, b) => a.position - b.position);
+  let courtsLeft = availableCourtCount;
 
-  // Build matchable units similar to matchmaking algorithm
-  const matchableUnits: { players: QueueEntryWithPlayer[]; startPosition: number; groupName?: string }[] = [];
+  // Generate display units in the same order the matchmaking algorithm would
+  while (remainingQueue.length >= 4 && courtsLeft > 0) {
+    const match = findNextDisplayMatch(remainingQueue, courtsLeft);
+    if (!match) break;
 
-  // First, identify all groups
-  const groupMap = new Map<string, QueueEntryWithPlayer[]>();
-  for (const entry of sortedEntries) {
-    if (entry.group_id) {
-      if (!groupMap.has(entry.group_id)) {
-        groupMap.set(entry.group_id, []);
-      }
-      groupMap.get(entry.group_id)!.push(entry);
+    const groupPlayers = match.filter(p => p.group_id);
+    let groupName: string | undefined;
+    if (groupPlayers.length > 0) {
+      groupName = (groupPlayers[0] as any).group?.name || `Group ${groupPlayers.length}`;
     }
-  }
 
-  // Create units for groups
-  for (const [groupId, members] of groupMap) {
-    const sortedMembers = members.sort((a, b) => a.position - b.position);
-    const groupName = (members[0] as any).group?.name || `Group ${members.length}`;
-
-    matchableUnits.push({
-      players: sortedMembers,
-      startPosition: sortedMembers[0].position,
-      groupName: members.length < 4 ? groupName : groupName
+    units.push({
+      type: groupName ? 'group' : 'solo_stack',
+      players: match,
+      placeholderCount: 0,
+      isComplete: true,
+      groupName
     });
 
-    members.forEach(m => processedPlayerIds.add(m.player_id));
+    const matchedIds = new Set(match.map(p => p.player_id));
+    remainingQueue = remainingQueue.filter(e => !matchedIds.has(e.player_id));
+    courtsLeft--;
   }
 
-  // Add solo players as individual units
-  for (const entry of sortedEntries) {
-    if (!processedPlayerIds.has(entry.player_id)) {
-      matchableUnits.push({
-        players: [entry],
-        startPosition: entry.position
-      });
-      processedPlayerIds.add(entry.player_id);
+  // Show remaining players as incomplete units in queue order
+  if (remainingQueue.length > 0) {
+    const leftover = buildLeftoverDisplayUnits(remainingQueue);
+    units.push(...leftover);
+  }
+
+  return units;
+}
+
+// Mirrors generateSingleMatch from algorithm (skips time urgency since that's server-side)
+function findNextDisplayMatch(
+  queueEntries: QueueEntryWithPlayer[],
+  remainingCourts: number
+): QueueEntryWithPlayer[] | null {
+  if (queueEntries.length < 4) return null;
+
+  // Priority 1: Group optimization — can a group play early without delaying solos?
+  const groupMatch = findGroupOptimizedDisplayMatch(queueEntries, remainingCourts);
+  if (groupMatch) return groupMatch;
+
+  // Priority 2: Strict queue order, respecting group integrity
+  return findGroupAwareDisplayMatch(queueEntries);
+}
+
+function findGroupOptimizedDisplayMatch(
+  queueEntries: QueueEntryWithPlayer[],
+  remainingCourts: number
+): QueueEntryWithPlayer[] | null {
+  const groups: { groupId: string; members: QueueEntryWithPlayer[]; startPosition: number }[] = [];
+  const solos: QueueEntryWithPlayer[] = [];
+  const groupMap = new Map<string, QueueEntryWithPlayer[]>();
+
+  for (const entry of queueEntries) {
+    if (entry.group_id) {
+      if (!groupMap.has(entry.group_id)) groupMap.set(entry.group_id, []);
+      groupMap.get(entry.group_id)!.push(entry);
+    } else {
+      solos.push(entry);
     }
   }
 
-  // Sort units by start position
-  matchableUnits.sort((a, b) => a.startPosition - b.startPosition);
+  for (const [groupId, members] of groupMap) {
+    const sorted = members.sort((a, b) => a.position - b.position);
+    groups.push({ groupId, members: sorted, startPosition: sorted[0].position });
+  }
+  groups.sort((a, b) => a.startPosition - b.startPosition);
 
-  // Now combine units to form matches of 4
-  processedPlayerIds.clear();
-  let i = 0;
+  for (const group of groups) {
+    const solosAhead = solos.filter(s => s.position < group.startPosition);
+    const courtsNeededForSolos = Math.ceil(solosAhead.length / 4);
+    const courtsAfterGroup = remainingCourts - 1;
 
-  while (i < matchableUnits.length) {
-    const unit = matchableUnits[i];
+    if (courtsAfterGroup >= courtsNeededForSolos) {
+      const match = [...group.members];
+      if (match.length === 4) return match;
+      if (match.length < 4) {
+        const groupPlayerIds = new Set(group.members.map(m => m.player_id));
+        const available = queueEntries
+          .filter(e => !groupPlayerIds.has(e.player_id))
+          .sort((a, b) => a.position - b.position);
+        match.push(...available.slice(0, 4 - match.length));
+      }
+      if (match.length === 4) return match;
+    }
+  }
 
-    // Skip already processed
-    if (unit.players.every(p => processedPlayerIds.has(p.player_id))) {
-      i++;
+  return null;
+}
+
+function findGroupAwareDisplayMatch(queueEntries: QueueEntryWithPlayer[]): QueueEntryWithPlayer[] | null {
+  const units = buildMatchableUnits(queueEntries);
+  const result: QueueEntryWithPlayer[] = [];
+
+  for (let i = 0; i < units.length && result.length < 4; i++) {
+    const unit = units[i];
+
+    if (unit.isGroup && unit.players.length === 4) {
+      if (result.length === 0) return unit.players;
       continue;
     }
 
-    // If this is a complete group of 4, show it alone
-    if (unit.groupName && unit.players.length === 4) {
+    if (result.length + unit.players.length <= 4) {
+      result.push(...unit.players);
+      if (result.length === 4) return result;
+    } else {
+      break;
+    }
+  }
+
+  return null;
+}
+
+function buildMatchableUnits(queueEntries: QueueEntryWithPlayer[]) {
+  const units: { players: QueueEntryWithPlayer[]; startPosition: number; isGroup: boolean; groupName?: string }[] = [];
+  const processed = new Set<string>();
+  const sorted = [...queueEntries].sort((a, b) => a.position - b.position);
+
+  for (const entry of sorted) {
+    if (processed.has(entry.player_id)) continue;
+
+    if (entry.group_id) {
+      const members = queueEntries
+        .filter(e => e.group_id === entry.group_id)
+        .sort((a, b) => a.position - b.position);
       units.push({
-        type: 'group',
-        players: unit.players,
-        placeholderCount: 0,
-        isComplete: true,
-        groupName: unit.groupName
+        players: members,
+        startPosition: members[0].position,
+        isGroup: true,
+        groupName: (members[0] as any).group?.name || `Group ${members.length}`
       });
-      unit.players.forEach(p => processedPlayerIds.add(p.player_id));
-      i++;
-      continue;
+      members.forEach(m => processed.add(m.player_id));
+    } else {
+      units.push({ players: [entry], startPosition: entry.position, isGroup: false });
+      processed.add(entry.player_id);
     }
+  }
 
-    // Build a match of up to 4 players
-    const match: QueueEntryWithPlayer[] = [];
-    let groupName: string | undefined = unit.groupName;
+  return units.sort((a, b) => a.startPosition - b.startPosition);
+}
 
-    // Start with this unit
-    match.push(...unit.players);
-    unit.players.forEach(p => processedPlayerIds.add(p.player_id));
+function buildLeftoverDisplayUnits(remaining: QueueEntryWithPlayer[]): DisplayUnit[] {
+  const units: DisplayUnit[] = [];
+  const matchableUnits = buildMatchableUnits(remaining);
+  const processed = new Set<string>();
 
-    // Try to fill to 4 players
-    for (let j = i + 1; j < matchableUnits.length && match.length < 4; j++) {
-      const nextUnit = matchableUnits[j];
+  for (const mu of matchableUnits) {
+    if (mu.players.every(p => processed.has(p.player_id))) continue;
 
-      // Skip if already processed
-      if (nextUnit.players.every(p => processedPlayerIds.has(p.player_id))) {
-        continue;
-      }
+    const match: QueueEntryWithPlayer[] = [...mu.players];
+    mu.players.forEach(p => processed.add(p.player_id));
+    let groupName = mu.groupName;
 
-      // Skip complete groups of 4 (they play alone)
-      if (nextUnit.groupName && nextUnit.players.length === 4) {
-        continue;
-      }
+    // Try to fill to 4
+    for (const nextMu of matchableUnits) {
+      if (match.length >= 4) break;
+      if (nextMu.players.every(p => processed.has(p.player_id))) continue;
+      if (nextMu.isGroup && nextMu.players.length === 4) continue;
 
-      // Check if this unit fits
-      if (match.length + nextUnit.players.length <= 4) {
-        match.push(...nextUnit.players);
-        nextUnit.players.forEach(p => processedPlayerIds.add(p.player_id));
-
-        // If we're adding a group to solos, use the group name
-        if (nextUnit.groupName && !groupName) {
-          groupName = nextUnit.groupName;
-        }
+      if (match.length + nextMu.players.length <= 4) {
+        match.push(...nextMu.players);
+        nextMu.players.forEach(p => processed.add(p.player_id));
+        if (!groupName && nextMu.groupName) groupName = nextMu.groupName;
       }
     }
 
-    // Create display unit
     units.push({
-      type: groupName ? 'solo_stack' : 'solo_stack',
+      type: groupName ? 'group' : 'solo_stack',
       players: match,
       placeholderCount: Math.max(0, 4 - match.length),
       isComplete: match.length === 4,
-      groupName: groupName
+      groupName
     });
-
-    i++;
   }
 
   return units;
@@ -349,7 +413,7 @@ export default function TVDisplay() {
           ) : (
             <div className="space-y-4 overflow-y-auto flex-1 pr-2">
               {(() => {
-                const displayUnits = createDisplayUnits(waitingQueue);
+                const displayUnits = createDisplayUnits(waitingQueue, availableCourts);
                 let positionCounter = 1;
                 
                 return displayUnits.map((unit, unitIndex) => (
