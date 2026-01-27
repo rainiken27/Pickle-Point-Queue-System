@@ -1149,37 +1149,42 @@ export default function AdminDashboardRedesign() {
         });
       }
 
-      // 2. Add the replacement player to the queue
-      await fetch('/api/queue/add', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          playerId: replacementPlayerId,
-        }),
-      });
-
       // 3. Update the match suggestion to replace the current player with the replacement
       const suggestion = matchSuggestions[courtId];
       if (suggestion) {
-        const updatedPlayers = suggestion.players.map((p: any) => 
-          p.id === currentPlayerId 
-            ? {
-                id: replacementPlayerId,
-                name: queueEntries.find(e => e.player_id === replacementPlayerId)?.player?.name || 'Unknown',
-                skill_level: queueEntries.find(e => e.player_id === replacementPlayerId)?.player?.skill_level || 'unknown',
-                photo_url: queueEntries.find(e => e.player_id === replacementPlayerId)?.player?.photo_url || null
-              }
-            : p
-        );
-
-        // Update the match suggestion
-        setMatchSuggestions({
-          ...matchSuggestions,
-          [courtId]: {
-            ...suggestion,
-            players: updatedPlayers
-          }
+        // Get replacement player info from the API response
+        const addResponse = await fetch('/api/queue/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            playerId: replacementPlayerId,
+          }),
         });
+
+        if (addResponse.ok) {
+          const replacementData = await addResponse.json();
+          const replacementPlayer = replacementData.player;
+
+          const updatedPlayers = suggestion.players.map((p: any) => 
+            p.id === currentPlayerId 
+              ? {
+                  id: replacementPlayerId,
+                  name: replacementPlayer.name || 'Unknown',
+                  skill_level: replacementPlayer.skill_level || 'unknown',
+                  photo_url: replacementPlayer.photo_url || null
+                }
+              : p
+          );
+
+          // Update the match suggestion
+          setMatchSuggestions({
+            ...matchSuggestions,
+            [courtId]: {
+              ...suggestion,
+              players: updatedPlayers
+            }
+          });
+        }
 
         // Update verified players set - remove current player, add replacement
         const verified = verifiedPlayers[courtId] || new Set();
