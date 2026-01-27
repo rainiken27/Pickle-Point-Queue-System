@@ -13,6 +13,7 @@ interface PlayerReplacementProps {
   currentPlayerName: string;
   currentPlayerId: string;
   courtId: string;
+  queueEntries?: any[]; // Add queue entries to filter out players already in queue
 }
 
 interface PlayerSearchResult {
@@ -28,7 +29,8 @@ export function PlayerReplacement({
   onReplace,
   currentPlayerName,
   currentPlayerId,
-  courtId
+  courtId,
+  queueEntries = []
 }: PlayerReplacementProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<PlayerSearchResult[]>([]);
@@ -66,8 +68,20 @@ export function PlayerReplacement({
         const response = await fetch(`/api/players/search?name=${encodeURIComponent(searchQuery)}`);
         if (response.ok) {
           const data = await response.json();
-          // Filter out the current player being replaced
-          const filteredResults = data.filter((p: PlayerSearchResult) => p.id !== currentPlayerId);
+          
+          // Get IDs of players currently playing (not waiting in queue)
+          const playersPlaying = new Set(
+            queueEntries
+              .filter(entry => entry.status === 'playing')
+              .map(entry => entry.player_id)
+          );
+          
+          // Filter out the current player being replaced AND players currently playing
+          // But ALLOW players who are waiting in queue
+          const filteredResults = data.filter((p: PlayerSearchResult) => 
+            p.id !== currentPlayerId && !playersPlaying.has(p.id)
+          );
+          
           setSearchResults(filteredResults);
         }
       } catch (error) {

@@ -1132,69 +1132,102 @@ export default function AdminDashboardRedesign() {
   };
 
   const handlePlayerReplacement = async (replacementPlayerId: string) => {
-    const { currentPlayerId, courtId } = playerReplacementModal;
+    const { currentPlayerId, currentPlayerName, courtId } = playerReplacementModal;
+    console.log('Starting replacement:', { currentPlayerId, currentPlayerName, replacementPlayerId, courtId });
 
     try {
-      // 1. Take the current player on break (remove from queue but keep session active)
-      const currentPlayerQueueEntry = queueEntries.find(e => e.player_id === currentPlayerId && e.status === 'waiting');
-      if (currentPlayerQueueEntry) {
-        await fetch('/api/queue/remove', {
+      // 1. Check if the no-show player is actually in the queue and remove them
+      console.log('Checking if no-show player is in queue');
+      const noShowPlayerInQueue = queueEntries.find(e => e.player_id === currentPlayerId);
+      
+      if (noShowPlayerInQueue) {
+        console.log('No-show player found in queue, removing them:', noShowPlayerInQueue);
+        const removeResponse = await fetch('/api/queue/remove', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            queueId: currentPlayerQueueEntry.id,
+            queue_id: noShowPlayerInQueue.id,
             reason: 'temporary_break',
-            shouldEndSession: false,
+            end_session: false,
           }),
         });
+        
+        if (removeResponse.ok) {
+          console.log('Successfully removed no-show player from queue');
+        } else {
+          const removeError = await removeResponse.json();
+          console.error('Failed to remove no-show player from queue:', removeError);
+        }
+      } else {
+        console.log('No-show player not in queue, skipping removal');
       }
-
-      // 3. Update the match suggestion to replace the current player with the replacement
+      
+      // 2. Update the match suggestion to replace the current player with the replacement
       const suggestion = matchSuggestions[courtId];
       if (suggestion) {
-        // Get replacement player info from the API response
-        const addResponse = await fetch('/api/queue/add', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            playerId: replacementPlayerId,
-          }),
-        });
-
-        if (addResponse.ok) {
-          const replacementData = await addResponse.json();
-          const replacementPlayer = replacementData.player;
-
-          const updatedPlayers = suggestion.players.map((p: any) => 
-            p.id === currentPlayerId 
-              ? {
-                  id: replacementPlayerId,
-                  name: replacementPlayer.name || 'Unknown',
-                  skill_level: replacementPlayer.skill_level || 'unknown',
-                  photo_url: replacementPlayer.photo_url || null
-                }
-              : p
-          );
-
-          // Update the match suggestion
-          setMatchSuggestions({
-            ...matchSuggestions,
-            [courtId]: {
-              ...suggestion,
-              players: updatedPlayers
-            }
-          });
+        // Get replacement player info - either from queue or create a basic entry
+        let replacementPlayer;
+        const replacementPlayerInQueue = queueEntries.find(e => e.player_id === replacementPlayerId);
+        
+        if (replacementPlayerInQueue) {
+          // Player is in queue - use their data
+          console.log('Using replacement player from queue:', replacementPlayerInQueue);
+          replacementPlayer = replacementPlayerInQueue.player;
+          
+          // Don't remove from queue - the player will be assigned to court when match starts
+          // Just keep them in queue with "waiting" status for now
+          console.log('Replacement player will be assigned to court when match starts');
+        } else {
+          // Player not in queue - create basic info
+          console.log('Replacement player not in queue, creating basic info');
+          replacementPlayer = {
+            id: replacementPlayerId,
+            name: 'Unknown Player',
+            skill_level: 'unknown',
+            photo_url: null
+          };
         }
+
+        const updatedPlayers = suggestion.players.map((p: any) => 
+          p.id === currentPlayerId 
+            ? {
+                id: replacementPlayerId,
+                name: replacementPlayer.name || 'Unknown',
+                skill_level: replacementPlayer.skill_level || 'unknown',
+                photo_url: replacementPlayer.photo_url || null
+              }
+            : p
+        );
+
+        console.log('Updated players:', updatedPlayers);
+
+        // Update the match suggestion
+        const newMatchSuggestions = {
+          ...matchSuggestions,
+          [courtId]: {
+            ...suggestion,
+            players: updatedPlayers
+          }
+        };
+        
+        console.log('New match suggestions:', newMatchSuggestions);
+        setMatchSuggestions(newMatchSuggestions);
 
         // Update verified players set - remove current player, add replacement
         const verified = verifiedPlayers[courtId] || new Set();
         const newVerified = new Set(verified);
         newVerified.delete(currentPlayerId);
         newVerified.add(replacementPlayerId);
+        
+        console.log('Updated verified set:', newVerified);
         setVerifiedPlayers({
           ...verifiedPlayers,
           [courtId]: newVerified
         });
+      } else {
+        console.error('No match suggestion found for court:', courtId);
+        alert('Error: No match suggestion found for this court');
+        return;
       }
 
       await fetchQueue();
@@ -2036,6 +2069,7 @@ export default function AdminDashboardRedesign() {
         currentPlayerName={playerReplacementModal.currentPlayerName}
         currentPlayerId={playerReplacementModal.currentPlayerId}
         courtId={playerReplacementModal.courtId}
+        queueEntries={queueEntries}
       />
     </div>
   );
