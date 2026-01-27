@@ -13,6 +13,7 @@ import {
 import { getSkillLevelLabel } from '@/lib/utils/skillLevel';
 import { QRScanner } from '@/components/QRScanner';
 import { PlayerAvatar } from '@/components/ui/PlayerAvatar';
+import { PlayerReplacement } from '@/components/PlayerReplacement';
 import { ImageWithFallback } from '@/components/ui/ImageWithFallback';
 import {
   DndContext,
@@ -158,6 +159,17 @@ export default function AdminDashboardRedesign() {
     teamB: [],
     teamAScore: 0,
     teamBScore: 0,
+  });
+  const [playerReplacementModal, setPlayerReplacementModal] = useState<{
+    isOpen: boolean;
+    currentPlayerId: string;
+    currentPlayerName: string;
+    courtId: string;
+  }>({
+    isOpen: false,
+    currentPlayerId: '',
+    currentPlayerName: '',
+    courtId: '',
   });
   const [autoCompletedCourts, setAutoCompletedCourts] = useState<Set<string>>(new Set());
   
@@ -1100,6 +1112,95 @@ export default function AdminDashboardRedesign() {
     }
   };
 
+  // Player replacement handlers
+  const openPlayerReplacement = (currentPlayerId: string, currentPlayerName: string, courtId: string) => {
+    setPlayerReplacementModal({
+      isOpen: true,
+      currentPlayerId,
+      currentPlayerName,
+      courtId,
+    });
+  };
+
+  const closePlayerReplacement = () => {
+    setPlayerReplacementModal({
+      isOpen: false,
+      currentPlayerId: '',
+      currentPlayerName: '',
+      courtId: '',
+    });
+  };
+
+  const handlePlayerReplacement = async (replacementPlayerId: string) => {
+    const { currentPlayerId, courtId } = playerReplacementModal;
+
+    try {
+      // 1. Take the current player on break (remove from queue but keep session active)
+      const currentPlayerQueueEntry = queueEntries.find(e => e.player_id === currentPlayerId && e.status === 'waiting');
+      if (currentPlayerQueueEntry) {
+        await fetch('/api/queue/remove', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            queueId: currentPlayerQueueEntry.id,
+            reason: 'temporary_break',
+            shouldEndSession: false,
+          }),
+        });
+      }
+
+      // 2. Add the replacement player to the queue
+      await fetch('/api/queue/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          playerId: replacementPlayerId,
+        }),
+      });
+
+      // 3. Update the match suggestion to replace the current player with the replacement
+      const suggestion = matchSuggestions[courtId];
+      if (suggestion) {
+        const updatedPlayers = suggestion.players.map((p: any) => 
+          p.id === currentPlayerId 
+            ? {
+                id: replacementPlayerId,
+                name: queueEntries.find(e => e.player_id === replacementPlayerId)?.player?.name || 'Unknown',
+                skill_level: queueEntries.find(e => e.player_id === replacementPlayerId)?.player?.skill_level || 'unknown',
+                photo_url: queueEntries.find(e => e.player_id === replacementPlayerId)?.player?.photo_url || null
+              }
+            : p
+        );
+
+        // Update the match suggestion
+        setMatchSuggestions({
+          ...matchSuggestions,
+          [courtId]: {
+            ...suggestion,
+            players: updatedPlayers
+          }
+        });
+
+        // Update verified players set - remove current player, add replacement
+        const verified = verifiedPlayers[courtId] || new Set();
+        const newVerified = new Set(verified);
+        newVerified.delete(currentPlayerId);
+        newVerified.add(replacementPlayerId);
+        setVerifiedPlayers({
+          ...verifiedPlayers,
+          [courtId]: newVerified
+        });
+      }
+
+      await fetchQueue();
+
+      alert('Player replaced successfully! You can now start the match.');
+    } catch (error) {
+      console.error('Error replacing player:', error);
+      alert('Failed to replace player: ' + (error as Error).message);
+    }
+  };
+
   const availableCourts = courts.filter(c => c.status === 'available');
   const occupiedCourts = courts.filter(c => c.status === 'occupied');
   const reservedCourts = courts.filter(c => c.status === 'reserved');
@@ -1197,7 +1298,16 @@ export default function AdminDashboardRedesign() {
                             {i + 1}. {p.name}
                           </span>
                           {!verified.has(p.id) && (
-                            <span className="text-xs text-red-600 font-medium">No-show</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-red-600 font-medium">No-show</span>
+                              <button
+                                onClick={() => openPlayerReplacement(p.id, p.name, court.id)}
+                                className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition"
+                                title="Replace Player"
+                              >
+                                Replace
+                              </button>
+                            </div>
                           )}
                         </label>
                       ))}
@@ -1222,15 +1332,9 @@ export default function AdminDashboardRedesign() {
                     </Button>
 
                     {verified.size < (suggestion.match_type === 'singles' ? 2 : 4) && (
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        onClick={() => handleReplaceNoShows(court.id)}
-                        className="w-full"
-                      >
-                        <UserX className="w-4 h-4 mr-2" />
-                        Replace No-Shows
-                      </Button>
+                      <div className="text-xs text-orange-600 text-center">
+                        💡 Individual "Replace" buttons are available for each no-show player above
+                      </div>
                     )}
 
                     <Button
@@ -1317,6 +1421,62 @@ export default function AdminDashboardRedesign() {
                   </>
                 );
               })()}
+
+              {/* Current Players on Court */}
+              {(() => {
+                const playingOnCourt = queueEntries.filter(
+                  e => e.status === 'playing' && e.court_id === court.id
+                );
+
+                if (playingOnCourt.length === 0) {
+                  // Try to get players from court's stored data
+                  const courtPlayers = (court as any).current_players;
+                  if (courtPlayers && Array.isArray(courtPlayers)) {
+                    return (
+                      <div className="space-y-2">
+                        <p className="text-sm font-semibold text-gray-700">Current Players:</p>
+                        {courtPlayers.map((player: any, idx: number) => (
+                          <div key={idx} className="flex items-center gap-2 p-2 bg-gray-50 rounded border">
+                            <PlayerAvatar
+                              name={player.name}
+                              photo_url={player.photo_url}
+                              size="sm"
+                              className="shrink-0"
+                            />
+                            <div className="flex-1">
+                              <p className="font-semibold text-sm">{player.name}</p>
+                              <p className="text-xs text-gray-600">{getSkillLevelLabel(player.skill_level)}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  }
+                  return null;
+                }
+
+                return (
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold text-gray-700">Current Players:</p>
+                    {playingOnCourt.map((entry) => (
+                      <div key={entry.id} className="flex items-center gap-2 p-2 bg-gray-50 rounded border">
+                        <PlayerAvatar
+                          name={entry.player.name}
+                          photo_url={entry.player.photo_url}
+                          display_photo={(entry as any).session?.display_photo}
+                          size="sm"
+                          className="shrink-0"
+                        />
+                        <div className="flex-1">
+                          <p className="font-semibold text-sm">{entry.player.name}</p>
+                          <p className="text-xs text-gray-600">{getSkillLevelLabel(entry.player.skill_level)}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+
               <Button
                 size="sm"
                 variant="success"
@@ -1862,6 +2022,16 @@ export default function AdminDashboardRedesign() {
           </div>
         </div>
       )}
+
+      {/* Player Replacement Modal */}
+      <PlayerReplacement
+        isOpen={playerReplacementModal.isOpen}
+        onClose={closePlayerReplacement}
+        onReplace={handlePlayerReplacement}
+        currentPlayerName={playerReplacementModal.currentPlayerName}
+        currentPlayerId={playerReplacementModal.currentPlayerId}
+        courtId={playerReplacementModal.courtId}
+      />
     </div>
   );
 }
