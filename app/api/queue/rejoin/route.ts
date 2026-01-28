@@ -133,6 +133,20 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Clean up queue entries for non-eligible players (expired/ended sessions)
+    const eligibleIds = new Set(eligiblePlayers.map(p => p.queueEntry.id));
+    const ineligibleEntries = playingEntries.filter(e => !eligibleIds.has(e.id));
+    if (ineligibleEntries.length > 0) {
+      console.log(`[REJOIN] Cleaning up ${ineligibleEntries.length} ineligible player(s)`);
+      const { error: cleanupError } = await supabaseServer
+        .from('queue')
+        .delete()
+        .in('id', ineligibleEntries.map(e => e.id));
+      if (cleanupError) {
+        console.error('[REJOIN] Cleanup error:', cleanupError);
+      }
+    }
+
     if (eligiblePlayers.length === 0) {
       return NextResponse.json(
         { message: 'No eligible players to rejoin (sessions expired)', rejoined: 0 },

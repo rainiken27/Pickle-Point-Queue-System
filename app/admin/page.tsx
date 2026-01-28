@@ -165,11 +165,13 @@ export default function AdminDashboardRedesign() {
     currentPlayerId: string;
     currentPlayerName: string;
     courtId: string;
+    isMidMatch: boolean;
   }>({
     isOpen: false,
     currentPlayerId: '',
     currentPlayerName: '',
     courtId: '',
+    isMidMatch: false,
   });
   const [autoCompletedCourts, setAutoCompletedCourts] = useState<Set<string>>(new Set());
   
@@ -1085,7 +1087,26 @@ export default function AdminDashboardRedesign() {
       }
 
       const winner = teamAScore > teamBScore ? 'Team A' : teamBScore > teamAScore ? 'Team B' : 'Tie';
-      alert(`✓ Match completed! ${winner} wins (${teamAScore}-${teamBScore})`);
+
+      // Auto-rejoin eligible players back to the queue
+      let rejoinMsg = '';
+      try {
+        const rejoinResponse = await fetch('/api/queue/rejoin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ court_id: courtId }),
+        });
+        const rejoinData = await rejoinResponse.json();
+        if (rejoinData.rejoined > 0) {
+          rejoinMsg = ` ${rejoinData.rejoined} player(s) rejoined the queue.`;
+        }
+      } catch (rejoinError) {
+        console.error('Failed to rejoin players:', rejoinError);
+      }
+
+      await completeSession(courtId);
+
+      alert(`✓ Match completed! ${winner} wins (${teamAScore}-${teamBScore}).${rejoinMsg}`);
 
       // Clear the auto-completed flag for this court
       setAutoCompletedCourts(prev => {
@@ -1113,12 +1134,13 @@ export default function AdminDashboardRedesign() {
   };
 
   // Player replacement handlers
-  const openPlayerReplacement = (currentPlayerId: string, currentPlayerName: string, courtId: string) => {
+  const openPlayerReplacement = (currentPlayerId: string, currentPlayerName: string, courtId: string, isMidMatch = false) => {
     setPlayerReplacementModal({
       isOpen: true,
       currentPlayerId,
       currentPlayerName,
       courtId,
+      isMidMatch,
     });
   };
 
@@ -1128,21 +1150,44 @@ export default function AdminDashboardRedesign() {
       currentPlayerId: '',
       currentPlayerName: '',
       courtId: '',
+      isMidMatch: false,
     });
   };
 
   const handlePlayerReplacement = async (replacementPlayerId: string) => {
-    const { currentPlayerId, currentPlayerName, courtId } = playerReplacementModal;
-    console.log('Starting replacement:', { currentPlayerId, currentPlayerName, replacementPlayerId, courtId });
+    const { currentPlayerId, currentPlayerName, courtId, isMidMatch } = playerReplacementModal;
+    console.log('Starting replacement:', { currentPlayerId, currentPlayerName, replacementPlayerId, courtId, isMidMatch });
 
     try {
+      if (isMidMatch) {
+        // Mid-match replacement: call the replace-player API
+        const response = await fetch('/api/courts/replace-player', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            court_id: courtId,
+            old_player_id: currentPlayerId,
+            new_player_id: replacementPlayerId,
+          }),
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || 'Failed to replace player');
+        }
+
+        alert(`Replaced ${data.old_player.name} with ${data.new_player.name}. ${data.old_player.name} is on a break.`);
+        await fetchQueue();
+        await fetchCourts();
+        return;
+      }
+
+      // Pre-match replacement (no-show flow)
       // 1. Check if the no-show player is actually in the queue and remove them
-      console.log('Checking if no-show player is in queue');
       const noShowPlayerInQueue = queueEntries.find(e => e.player_id === currentPlayerId);
-      
+
       if (noShowPlayerInQueue) {
-        console.log('No-show player found in queue, removing them:', noShowPlayerInQueue);
-        const removeResponse = await fetch('/api/queue/remove', {
+        await fetch('/api/queue/remove', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1151,35 +1196,17 @@ export default function AdminDashboardRedesign() {
             end_session: false,
           }),
         });
-        
-        if (removeResponse.ok) {
-          console.log('Successfully removed no-show player from queue');
-        } else {
-          const removeError = await removeResponse.json();
-          console.error('Failed to remove no-show player from queue:', removeError);
-        }
-      } else {
-        console.log('No-show player not in queue, skipping removal');
       }
-      
+
       // 2. Update the match suggestion to replace the current player with the replacement
       const suggestion = matchSuggestions[courtId];
       if (suggestion) {
-        // Get replacement player info - either from queue or create a basic entry
         let replacementPlayer;
         const replacementPlayerInQueue = queueEntries.find(e => e.player_id === replacementPlayerId);
-        
+
         if (replacementPlayerInQueue) {
-          // Player is in queue - use their data
-          console.log('Using replacement player from queue:', replacementPlayerInQueue);
           replacementPlayer = replacementPlayerInQueue.player;
-          
-          // Don't remove from queue - the player will be assigned to court when match starts
-          // Just keep them in queue with "waiting" status for now
-          console.log('Replacement player will be assigned to court when match starts');
         } else {
-          // Player not in queue - create basic info
-          console.log('Replacement player not in queue, creating basic info');
           replacementPlayer = {
             id: replacementPlayerId,
             name: 'Unknown Player',
@@ -1188,8 +1215,8 @@ export default function AdminDashboardRedesign() {
           };
         }
 
-        const updatedPlayers = suggestion.players.map((p: any) => 
-          p.id === currentPlayerId 
+        const updatedPlayers = suggestion.players.map((p: any) =>
+          p.id === currentPlayerId
             ? {
                 id: replacementPlayerId,
                 name: replacementPlayer.name || 'Unknown',
@@ -1199,39 +1226,22 @@ export default function AdminDashboardRedesign() {
             : p
         );
 
-        console.log('Updated players:', updatedPlayers);
-
-        // Update the match suggestion
-        const newMatchSuggestions = {
+        setMatchSuggestions({
           ...matchSuggestions,
-          [courtId]: {
-            ...suggestion,
-            players: updatedPlayers
-          }
-        };
-        
-        console.log('New match suggestions:', newMatchSuggestions);
-        setMatchSuggestions(newMatchSuggestions);
+          [courtId]: { ...suggestion, players: updatedPlayers }
+        });
 
-        // Update verified players set - remove current player, add replacement
         const verified = verifiedPlayers[courtId] || new Set();
         const newVerified = new Set(verified);
         newVerified.delete(currentPlayerId);
         newVerified.add(replacementPlayerId);
-        
-        console.log('Updated verified set:', newVerified);
-        setVerifiedPlayers({
-          ...verifiedPlayers,
-          [courtId]: newVerified
-        });
+        setVerifiedPlayers({ ...verifiedPlayers, [courtId]: newVerified });
       } else {
-        console.error('No match suggestion found for court:', courtId);
         alert('Error: No match suggestion found for this court');
         return;
       }
 
       await fetchQueue();
-
       alert('Player replaced successfully! You can now start the match.');
     } catch (error) {
       console.error('Error replacing player:', error);

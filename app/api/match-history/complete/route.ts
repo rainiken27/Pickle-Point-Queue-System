@@ -95,25 +95,12 @@ export async function POST(request: NextRequest) {
       console.error('[COURT UPDATE ERROR]', courtError);
     }
 
-    // Update queue entries - remove players from playing status
-    const playerIds = [
-      team_a_player_1_id,
-      team_a_player_2_id,
-      team_b_player_1_id,
-      team_b_player_2_id,
-    ].filter(id => id !== null && id !== undefined);
-
-    const { error: queueError } = await supabaseServer
-      .from('queue')
-      .delete()
-      .in('player_id', playerIds)
-      .eq('status', 'playing');
-
-    if (queueError) {
-      console.error('[QUEUE UPDATE ERROR]', queueError);
-    }
+    // Queue entries are NOT deleted here — the rejoin endpoint handles
+    // transitioning eligible players back to 'waiting' status.
 
     console.log(`[MATCH COMPLETE] Court ${court_id}: ${winning_team} wins (${team_a_score}-${team_b_score})`);
+
+    const playerCount = [team_a_player_1_id, team_a_player_2_id, team_b_player_1_id, team_b_player_2_id].filter(Boolean).length;
 
     return NextResponse.json(
       {
@@ -121,7 +108,7 @@ export async function POST(request: NextRequest) {
         message: 'Match completed and stats updated',
         match_id: result?.match_id,
         winning_team,
-        players_updated: playerIds.length,
+        players_updated: playerCount,
       },
       { status: 200 }
     );
