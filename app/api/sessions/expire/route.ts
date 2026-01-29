@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabase/server';
 
 const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
-const GRACE_PERIOD_MS = 25 * 60 * 1000;
+const GRACE_PERIOD_MS = 0; // No grace period - remove immediately
 const TOTAL_ALLOWED_MS = FIVE_HOURS_MS + GRACE_PERIOD_MS;
 
 /**
@@ -45,7 +45,7 @@ export async function POST() {
       const startTime = new Date(session.start_time).getTime();
       const elapsed = now - startTime;
 
-      // Check if beyond 5 hours + 25 minute grace period
+      // Check if beyond 5 hours (no grace period)
       if (elapsed > TOTAL_ALLOWED_MS) {
         expiredSessionIds.push(session.id);
         expiredPlayerIds.push(session.player_id);

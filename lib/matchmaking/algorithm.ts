@@ -4,12 +4,11 @@ import { supabaseServer as supabase } from '@/lib/supabase/server';
 export class MatchmakingEngine {
   /**
    * Generate match suggestions for all available courts:
-   * 1. Time Urgency (players with <15 min remaining get priority)
-   * 2. Solo Protection with Group Efficiency:
+   * 1. Solo Protection with Group Efficiency:
    *    - Groups NEVER get broken up (absolute rule)
    *    - Groups can play early IF there are enough courts to guarantee solo players won't be delayed
    *    - Strict queue order when court availability is limited, but respecting group integrity
-   * 3. Group-Aware Queue Processing (never break groups)
+   * 2. Group-Aware Queue Processing (never break groups)
    * 
    * Skill level and gender preferences are ignored - display only.
    */
@@ -57,28 +56,7 @@ export class MatchmakingEngine {
       return null;
     }
 
-    // Priority 1: Time urgency (players with <30 min remaining)
-    const urgentPlayers = await this.getUrgentPlayers(queueEntries);
-    if (urgentPlayers.length > 0) {
-      console.log(`[ALGORITHM] Found ${urgentPlayers.length} urgent players`);
-      
-      // Mix urgent players with non-urgent to form a match
-      const urgentPlayerIds = urgentPlayers.map(p => p.player_id);
-      const nonUrgentPlayers = queueEntries.filter(e => !urgentPlayerIds.includes(e.player_id));
-      
-      // Prioritize urgent players, then fill with earliest non-urgent
-      const prioritizedPlayers = [...urgentPlayers, ...nonUrgentPlayers];
-      const urgentMatch = prioritizedPlayers.slice(0, 4);
-      
-      console.log('[ALGORITHM] Using urgent priority match:', urgentMatch.map(p => p.player?.name));
-      return this.createMatchSuggestion(
-        urgentMatch,
-        courtId,
-        { has_time_urgent_players: true }
-      );
-    }
-
-    // Priority 2: Solo Protection with Group Efficiency
+    // Priority 1: Solo Protection with Group Efficiency
     const groupOptimizedMatch = this.findGroupOptimizedMatch(queueEntries, remainingCourts);
     if (groupOptimizedMatch) {
       console.log('[ALGORITHM] Using group-optimized match:', groupOptimizedMatch.map(p => p.player?.name));
@@ -89,7 +67,7 @@ export class MatchmakingEngine {
       );
     }
 
-    // Priority 3: Group-aware queue processing (never break groups)
+    // Priority 2: Group-aware queue processing (never break groups)
     const groupAwareMatch = this.findGroupAwareMatch(queueEntries);
     if (groupAwareMatch) {
       console.log('[ALGORITHM] Using group-aware match:', groupAwareMatch.map(p => p.player?.name));
@@ -376,43 +354,26 @@ export class MatchmakingEngine {
       return null;
     }
 
-    // Priority 1: Check for time urgent players
-    const urgentPlayers = await this.getUrgentPlayers(activeQueue);
-    let selectedPlayers: QueueEntryWithPlayer[];
-    let hasUrgentPlayers = false;
-
-    if (urgentPlayers.length > 0) {
-      console.log(`[ALGORITHM] Found ${urgentPlayers.length} urgent players for singles`);
-      // Take up to 2 urgent players, or mix with non-urgent if only 1 urgent
-      if (urgentPlayers.length >= 2) {
-        selectedPlayers = urgentPlayers.slice(0, 2);
-      } else {
-        const nonUrgent = activeQueue.filter(e => !urgentPlayers.some(u => u.player_id === e.player_id));
-        selectedPlayers = [urgentPlayers[0], nonUrgent[0]];
-      }
-      hasUrgentPlayers = true;
-    } else {
-      // Priority 2: Take first 2 players from queue (by position)
-      const sortedQueue = activeQueue.sort((a, b) => a.position - b.position);
-      selectedPlayers = sortedQueue.slice(0, 2);
-    }
+    // Take first 2 players from queue (by position)
+    const sortedQueue = activeQueue.sort((a, b) => a.position - b.position);
+    const selectedPlayers = sortedQueue.slice(0, 2);
 
     console.log('[ALGORITHM] Singles match players:', selectedPlayers.map(p => p.player?.name));
 
-    return this.createSinglesMatchSuggestion(selectedPlayers, courtId, hasUrgentPlayers);
+    return this.createSinglesMatchSuggestion(selectedPlayers, courtId);
   }
 
+// ... (rest of the code remains the same)
   /**
    * Create a singles match suggestion
    */
   private createSinglesMatchSuggestion(
     players: QueueEntryWithPlayer[],
-    courtId: string,
-    hasUrgentPlayers: boolean
+    courtId: string
   ): MatchSuggestion {
     const factors: MatchFactors = {
       is_friend_group: false, // Singles matches don't involve groups
-      has_time_urgent_players: hasUrgentPlayers,
+      has_time_urgent_players: false,
       skill_compatible: true,
       gender_compatible: true,
       variety_compliant: true,
@@ -420,8 +381,7 @@ export class MatchmakingEngine {
     };
 
     // Priority score
-    let priorityScore = 50;
-    if (hasUrgentPlayers) priorityScore += 100;
+    const priorityScore = 50;
 
     // Extract player objects
     const extractedPlayers = players.map(p => p.player).filter(p => p && p.id);
@@ -440,42 +400,9 @@ export class MatchmakingEngine {
     };
   }
 
-  private async getUrgentPlayers(queue: QueueEntryWithPlayer[]): Promise<QueueEntryWithPlayer[]> {
-    // Get players with active sessions < 30 min remaining, excluding unlimited_time players
-    const playerIds = queue.map(e => e.player_id);
-
-    const { data: sessions } = await supabase
-      .from('sessions')
-      .select(`
-        player_id, 
-        start_time,
-        players!inner (
-          unlimited_time
-        )
-      `)
-      .in('player_id', playerIds)
-      .eq('status', 'active')
-      .eq('players.unlimited_time', false); // Only check players without unlimited time
-
-    const urgentPlayerIds = (sessions || [])
-      .filter(session => {
-        const elapsed = Date.now() - new Date(session.start_time).getTime();
-        const remaining = 300 * 60 * 1000 - elapsed; // 5 hours in ms
-        return remaining < 15 * 60 * 1000; // < 15 minutes
-      })
-      .map(s => s.player_id);
-
-    return queue
-      .filter(e => urgentPlayerIds.includes(e.player_id))
-      .sort((a, b) => {
-        // Sort by least time remaining first
-        const aSession = sessions?.find(s => s.player_id === a.player_id);
-        const bSession = sessions?.find(s => s.player_id === b.player_id);
-        if (!aSession || !bSession) return 0;
-        return new Date(aSession.start_time).getTime() - new Date(bSession.start_time).getTime();
-      });
-  }
-
+  /**
+   * Create a match suggestion
+   */
   private createMatchSuggestion(
     players: QueueEntryWithPlayer[],
     courtId: string,
@@ -483,16 +410,15 @@ export class MatchmakingEngine {
   ): MatchSuggestion {
     const factors: MatchFactors = {
       is_friend_group: extraFactors.is_friend_group || false,
-      has_time_urgent_players: extraFactors.has_time_urgent_players || false,
+      has_time_urgent_players: false,
       skill_compatible: true, // Always true since we ignore skill matching
       gender_compatible: true, // Always true since we ignore gender matching
       variety_compliant: true, // Always true since we ignore variety enforcement
       relaxed_constraints: [], // No constraints to relax
     };
 
-    // Priority score: urgent > friend groups at front > regular queue order
+    // Priority score: friend groups at front > regular queue order
     let priorityScore = 50; // Base score
-    if (factors.has_time_urgent_players) priorityScore += 100; // Highest priority
     if (factors.is_friend_group) priorityScore += 25; // Bonus for groups at front
 
     // Extract player objects and validate

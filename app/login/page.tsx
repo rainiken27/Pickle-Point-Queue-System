@@ -48,6 +48,12 @@ export default function LoginPage() {
       console.log('Staff role response:', { staffRole, roleError });
 
       if (roleError || !staffRole) {
+        // In development, default to court_officer if no role exists
+        if (process.env.NODE_ENV === 'development') {
+          console.log('Dev mode: No staff role found, defaulting to court_officer');
+          window.location.href = '/admin';
+          return;
+        }
         await supabase.auth.signOut();
         throw new Error('No staff role assigned to this account');
       }

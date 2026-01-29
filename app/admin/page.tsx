@@ -584,7 +584,7 @@ export default function AdminDashboardRedesign() {
     };
 
     checkExpiredSessions();
-    const expirationInterval = setInterval(checkExpiredSessions, 2 * 60 * 1000);
+    const expirationInterval = setInterval(checkExpiredSessions, 30 * 1000); // Check every 30 seconds
 
     return () => {
       clearInterval(updateInterval);
@@ -613,11 +613,18 @@ export default function AdminDashboardRedesign() {
           .eq('status', 'active')
           .in('player_id', playerIds);
 
+        console.log('[Session Debug] Raw session data from DB:', data);
+
         if (data) {
           const sessionMap: Record<string, any> = {};
           data.forEach(session => {
+            console.log(`[Session Debug] Processing session for player ${session.player_id}:`, {
+              unlimited_time: session.players?.unlimited_time,
+              players_object: session.players
+            });
             sessionMap[session.player_id] = session;
           });
+          console.log('[Session Debug] Final session map:', sessionMap);
           setSessions(sessionMap);
         }
       } catch (error) {
@@ -630,7 +637,23 @@ export default function AdminDashboardRedesign() {
 
   const getSessionCountdown = (playerId: string) => {
     const session = sessions[playerId];
-    if (!session) return null;
+    if (!session) {
+      console.log(`[Session Debug] No session found for player ${playerId}`);
+      return null;
+    }
+
+    // Debug: Log the session structure
+    console.log(`[Session Debug] Player ${playerId} session:`, {
+      session_id: session.id,
+      start_time: session.start_time,
+      unlimited_time: session.players?.unlimited_time,
+      players_data: session.players
+    });
+
+    // Check if player has unlimited time
+    if (session.players?.unlimited_time) {
+      return '∞';
+    }
 
     const elapsed = Date.now() - new Date(session.start_time).getTime();
     const fiveHoursInMs = 5 * 60 * 60 * 1000;
