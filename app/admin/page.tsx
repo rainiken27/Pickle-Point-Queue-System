@@ -312,9 +312,96 @@ export default function AdminDashboardRedesign() {
   });
   const [autoCompletedCourts, setAutoCompletedCourts] = useState<Set<string>>(new Set());
   
+  // Time warning modal state
+  const [timeWarningModal, setTimeWarningModal] = useState<{
+    isOpen: boolean;
+    players: Array<{
+      name: string;
+      timeRemaining: string;
+      courtNumber: number;
+    }>;
+  }>({
+    isOpen: false,
+    players: [],
+  });
+  
   // Ref to store current courts for timer checking (avoids stale closure)
   const courtsRef = useRef(courts);
   const queueEntriesRef = useRef(queueEntries);
+
+  // Check for players with 30 minutes or less remaining
+  const checkForLowTimePlayers = async () => {
+    try {
+      const { supabase } = await import('@/lib/supabase/client');
+      
+      // Get all active sessions
+      const { data: sessions, error } = await supabase
+        .from('sessions')
+        .select(`
+          player_id,
+          start_time,
+          end_time,
+          players!inner (
+            name,
+            unlimited_time
+          )
+        `)
+        .eq('status', 'active')
+        .eq('players.unlimited_time', false);
+
+      if (error) {
+        console.error('Error checking low time players:', error);
+        return;
+      }
+
+      const lowTimePlayers: Array<{
+        name: string;
+        timeRemaining: string;
+        courtNumber: number;
+      }> = [];
+
+      const now = Date.now();
+
+      for (const session of sessions || []) {
+        let remainingMs: number;
+
+        if (session.end_time) {
+          // Use end_time if available (extended sessions)
+          remainingMs = new Date(session.end_time).getTime() - now;
+        } else {
+          // Use default 5-hour calculation
+          const startTime = new Date(session.start_time).getTime();
+          remainingMs = (startTime + 5 * 60 * 60 * 1000) - now;
+        }
+
+        // Check if 30 minutes or less remaining
+        if (remainingMs <= 30 * 60 * 1000 && remainingMs > 0) {
+          const minutes = Math.floor(remainingMs / (60 * 1000));
+          const seconds = Math.floor((remainingMs % (60 * 1000)) / 1000);
+          
+          // Get court number from queue entries
+          const queueEntry = queueEntries.find(e => e.player_id === session.player_id && e.status === 'playing');
+          const court = courts.find(c => c.id === queueEntry?.court_id);
+          
+          lowTimePlayers.push({
+            name: (session.players as any).name,
+            timeRemaining: `${minutes}:${seconds.toString().padStart(2, '0')}`,
+            courtNumber: court?.court_number || 0,
+          });
+        }
+      }
+
+      // Update modal state if there are players with low time
+      if (lowTimePlayers.length > 0) {
+        setTimeWarningModal({
+          isOpen: true,
+          players: lowTimePlayers,
+        });
+      }
+    } catch (error) {
+      console.error('Error checking low time players:', error);
+    }
+  };
 
   // Derived state - must be defined early for use in handlers
   const waitingQueue = queueEntries.filter(e => e.status === 'waiting');
@@ -328,6 +415,19 @@ export default function AdminDashboardRedesign() {
   useEffect(() => {
     queueEntriesRef.current = queueEntries;
   }, [queueEntries]);
+
+  // Check for low time players every minute
+  useEffect(() => {
+    // Initial check
+    checkForLowTimePlayers();
+    
+    // Set up interval to check every minute
+    const interval = setInterval(() => {
+      checkForLowTimePlayers();
+    }, 60 * 1000); // 1 minute
+
+    return () => clearInterval(interval);
+  }, [queueEntries, courts]); // Re-run when queue or courts change
 
   // Drag and drop sensors
   const sensors = useSensors(
@@ -2429,6 +2529,58 @@ export default function AdminDashboardRedesign() {
         queueEntries={queueEntries}
         isMidMatch={playerReplacementModal.isMidMatch}
       />
+
+      {/* Time Warning Modal */}
+      {timeWarningModal.isOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-2xl font-bold text-orange-600 flex items-center gap-2">
+                <AlertTriangle className="w-6 h-6" />
+                Time Warning
+              </h2>
+              <button
+                onClick={() => setTimeWarningModal({ isOpen: false, players: [] })}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <span className="text-2xl">×</span>
+              </button>
+            </div>
+            
+            <div className="mb-4">
+              <p className="text-gray-700 mb-3">
+                The following players have 30 minutes or less remaining in their session:
+              </p>
+              
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {timeWarningModal.players.map((player, index) => (
+                  <div key={index} className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold text-gray-900">{player.name}</p>
+                        <p className="text-sm text-gray-600">Court {player.courtNumber}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-lg font-bold text-orange-600">{player.timeRemaining}</p>
+                        <p className="text-xs text-gray-500">remaining</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            <div className="flex justify-end">
+              <Button
+                onClick={() => setTimeWarningModal({ isOpen: false, players: [] })}
+                className="w-full"
+              >
+                Acknowledge
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
