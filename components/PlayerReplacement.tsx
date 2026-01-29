@@ -9,11 +9,12 @@ import { QueueEntryWithPlayer } from '@/types';
 interface PlayerReplacementProps {
   isOpen: boolean;
   onClose: () => void;
-  onReplace: (replacementPlayerId: string) => void;
+  onReplace: (replacementPlayerId: string, moveNoShowToBottom: boolean) => void;
   currentPlayerName: string;
   currentPlayerId: string;
   courtId: string;
   queueEntries?: any[]; // Add queue entries to filter out players already in queue
+  isMidMatch?: boolean; // If true, this is a mid-match replacement (no queue options shown)
 }
 
 interface PlayerSearchResult {
@@ -30,12 +31,14 @@ export function PlayerReplacement({
   currentPlayerName,
   currentPlayerId,
   courtId,
-  queueEntries = []
+  queueEntries = [],
+  isMidMatch = false
 }: PlayerReplacementProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<PlayerSearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [selectedPlayer, setSelectedPlayer] = useState<PlayerSearchResult | null>(null);
+  const [moveNoShowToBottom, setMoveNoShowToBottom] = useState(true); // Default to move to bottom
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Focus input when modal opens
@@ -52,6 +55,7 @@ export function PlayerReplacement({
       setSearchResults([]);
       setSelectedPlayer(null);
       setSearchLoading(false);
+      setMoveNoShowToBottom(true); // Reset to default
     }
   }, [isOpen]);
 
@@ -103,7 +107,7 @@ export function PlayerReplacement({
 
   const handleReplace = () => {
     if (selectedPlayer) {
-      onReplace(selectedPlayer.id);
+      onReplace(selectedPlayer.id, moveNoShowToBottom);
       onClose();
     }
   };
@@ -125,8 +129,8 @@ export function PlayerReplacement({
           </div>
 
           {/* Current Player Info */}
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-            <p className="text-sm font-semibold text-red-900 mb-2">Current Player:</p>
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-sm font-semibold text-red-900 mb-2">No-Show Player:</p>
             <div className="flex items-center gap-3">
               <PlayerAvatar
                 name={currentPlayerName}
@@ -136,10 +140,44 @@ export function PlayerReplacement({
               />
               <div>
                 <p className="font-semibold text-red-800">{currentPlayerName}</p>
-                <p className="text-xs text-red-600">This player will take a break</p>
               </div>
             </div>
           </div>
+
+          {/* No-Show Action Options - only show for pre-match replacements */}
+          {!isMidMatch && (
+            <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <p className="text-sm font-semibold text-yellow-900 mb-3">What to do with {currentPlayerName}?</p>
+              <div className="space-y-2">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="noShowAction"
+                    checked={moveNoShowToBottom}
+                    onChange={() => setMoveNoShowToBottom(true)}
+                    className="w-4 h-4 text-blue-600"
+                  />
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">Move to bottom of queue</p>
+                    <p className="text-xs text-gray-600">They keep waiting, but at the end</p>
+                  </div>
+                </label>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="noShowAction"
+                    checked={!moveNoShowToBottom}
+                    onChange={() => setMoveNoShowToBottom(false)}
+                    className="w-4 h-4 text-blue-600"
+                  />
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">Remove from queue</p>
+                    <p className="text-xs text-gray-600">They exit the queue completely</p>
+                  </div>
+                </label>
+              </div>
+            </div>
+          )}
 
           {/* Search Input */}
           <div className="mb-4">

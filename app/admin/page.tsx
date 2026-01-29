@@ -1164,9 +1164,9 @@ export default function AdminDashboardRedesign() {
     });
   };
 
-  const handlePlayerReplacement = async (replacementPlayerId: string) => {
+  const handlePlayerReplacement = async (replacementPlayerId: string, moveNoShowToBottom: boolean = false) => {
     const { currentPlayerId, currentPlayerName, courtId, isMidMatch } = playerReplacementModal;
-    console.log('Starting replacement:', { currentPlayerId, currentPlayerName, replacementPlayerId, courtId, isMidMatch });
+    console.log('Starting replacement:', { currentPlayerId, currentPlayerName, replacementPlayerId, courtId, isMidMatch, moveNoShowToBottom });
 
     try {
       if (isMidMatch) {
@@ -1193,7 +1193,7 @@ export default function AdminDashboardRedesign() {
       }
 
       // Pre-match replacement (no-show flow)
-      // 1. Check if the no-show player is actually in the queue and remove them
+      // 1. Check if the no-show player is in the queue and handle based on user choice
       const noShowPlayerInQueue = queueEntries.find(e => e.player_id === currentPlayerId);
 
       if (noShowPlayerInQueue) {
@@ -1202,8 +1202,9 @@ export default function AdminDashboardRedesign() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             queue_id: noShowPlayerInQueue.id,
-            reason: 'temporary_break',
+            reason: 'no_show',
             end_session: false,
+            move_to_bottom: moveNoShowToBottom,
           }),
         });
       }
@@ -2090,6 +2091,7 @@ export default function AdminDashboardRedesign() {
         currentPlayerId={playerReplacementModal.currentPlayerId}
         courtId={playerReplacementModal.courtId}
         queueEntries={queueEntries}
+        isMidMatch={playerReplacementModal.isMidMatch}
       />
     </div>
   );
