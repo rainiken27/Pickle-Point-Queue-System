@@ -35,7 +35,7 @@ import { CSS } from '@dnd-kit/utilities';
 
 // Generate consistent color for groups based on their name/id
 const getGroupColor = (group: { id: string; name: string } | null) => {
-  if (!group) return { text: 'text-green-600', dot: 'bg-green-500' }; // Solo color
+  if (!group) return { text: 'text-green-600', dot: 'bg-green-500', bg: 'bg-green-50', border: 'border-green-200' }; // Solo color
   
   // Use group name + id for consistent hashing
   const hash = group.name + group.id;
@@ -72,10 +72,38 @@ const getGroupColor = (group: { id: string; name: string } | null) => {
     'bg-emerald-500',
   ];
   
+  const bgColors = [
+    'bg-yellow-50',
+    'bg-blue-50',
+    'bg-purple-50',
+    'bg-pink-50',
+    'bg-indigo-50',
+    'bg-orange-50',
+    'bg-teal-50',
+    'bg-red-50',
+    'bg-cyan-50',
+    'bg-emerald-50',
+  ];
+  
+  const borderColors = [
+    'border-yellow-200',
+    'border-blue-200',
+    'border-purple-200',
+    'border-pink-200',
+    'border-indigo-200',
+    'border-orange-200',
+    'border-teal-200',
+    'border-red-200',
+    'border-cyan-200',
+    'border-emerald-200',
+  ];
+  
   const index = Math.abs(hashNum) % colors.length;
   return {
     text: colors[index],
-    dot: dotColors[index]
+    dot: dotColors[index],
+    bg: bgColors[index],
+    border: borderColors[index]
   };
 };
 
@@ -104,7 +132,7 @@ function SortableQueueItem({ entry, countdown, onRemove }: any) {
       {...listeners}
       className={`rounded-lg shadow-sm border p-3 cursor-grab active:cursor-grabbing ${
         entry.group_id 
-          ? `${getGroupColor((entry as any).group).text.replace('text-', 'bg-').replace('600', '50')} border-${getGroupColor((entry as any).group).text.replace('text-', '').replace('600', '200')}` 
+          ? `${getGroupColor((entry as any).group).bg} ${getGroupColor((entry as any).group).border}` 
           : 'bg-green-50 border-green-200'
       }`}
     >
