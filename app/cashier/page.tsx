@@ -323,10 +323,31 @@ export default function CashierPage() {
       return;
     }
 
+    // Require receipt capture before starting group session
+    if (!receiptImage) {
+      alert('Please capture a receipt photo before starting the session.');
+      return;
+    }
+
     setLoading(true);
     try {
-      // Generate shared group_id
-      const groupId = crypto.randomUUID();
+      // Create the group in the database first (for foreign key constraint)
+      const groupResponse = await fetch('/api/groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: `Group ${new Date().toLocaleTimeString()}`,
+          member_ids: groupMembers.map(m => m.id),
+        }),
+      });
+
+      if (!groupResponse.ok) {
+        const error = await groupResponse.json();
+        throw new Error(error.error || 'Failed to create group');
+      }
+
+      const groupData = await groupResponse.json();
+      const groupId = groupData.id;
 
       let anyRejoining = false;
       let minTimeRemaining = '';
@@ -385,6 +406,8 @@ export default function CashierPage() {
         setSuccessMessage('');
         setIsRejoining(false);
         setTimeRemaining('');
+        setReceiptImage(null);
+        setReceiptType('physical');
       }, 3000);
     } catch (error) {
       alert('Failed to start group session: ' + (error as Error).message);
@@ -801,6 +824,71 @@ export default function CashierPage() {
               <p className="text-sm text-gray-600 mt-1">All group members will be matched together</p>
             </CardHeader>
             <CardBody className="space-y-6">
+              {/* Receipt Capture Section for Group */}
+              <div className="border-2 border-orange-200 bg-orange-50 rounded-lg p-4">
+                <h3 className="font-semibold text-orange-900 mb-3 flex items-center gap-2">
+                  <Receipt className="w-5 h-5" />
+                  Payment Receipt (Required)
+                </h3>
+
+                {/* Receipt Type Selection */}
+                <div className="mb-4">
+                  <label className="text-sm font-medium text-gray-700 mb-2 block">Receipt Type</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setReceiptType('physical')}
+                      className={`flex-1 py-2 px-4 rounded-lg border-2 transition-colors ${
+                        receiptType === 'physical'
+                          ? 'border-orange-500 bg-orange-100 text-orange-800'
+                          : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                      }`}
+                    >
+                      Physical Receipt
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReceiptType('gcash')}
+                      className={`flex-1 py-2 px-4 rounded-lg border-2 transition-colors ${
+                        receiptType === 'gcash'
+                          ? 'border-orange-500 bg-orange-100 text-orange-800'
+                          : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                      }`}
+                    >
+                      GCash Screenshot
+                    </button>
+                  </div>
+                </div>
+
+                {/* Receipt Capture or Preview */}
+                {receiptImage ? (
+                  <div className="space-y-3">
+                    <div className="border-2 border-green-500 rounded-lg overflow-hidden">
+                      <img src={receiptImage} alt="Captured receipt" className="w-full max-h-64 object-contain bg-white" />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-green-700 font-medium flex items-center gap-1">
+                        <Check className="w-4 h-4" />
+                        Receipt captured
+                      </span>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setReceiptImage(null)}
+                      >
+                        Retake
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <ReceiptCapture
+                    onCapture={(imageDataUrl) => setReceiptImage(imageDataUrl)}
+                    onError={(error) => console.error('Receipt capture error:', error)}
+                  />
+                )}
+              </div>
+
               <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
                 <div className="flex items-start gap-3">
                   <Check className="w-5 h-5 text-purple-600 mt-0.5" />
@@ -877,12 +965,16 @@ export default function CashierPage() {
 
               <Button
                 onClick={handleStartGroupSession}
-                disabled={loading}
+                disabled={loading || !receiptImage}
                 className="w-full"
                 size="lg"
               >
                 <Users className="w-5 h-5 mr-2" />
-                {loading ? 'Starting...' : `Start Sessions for ${groupMembers.length} Players`}
+                {loading
+                  ? 'Starting...'
+                  : !receiptImage
+                    ? 'Capture Receipt First'
+                    : `Start Sessions for ${groupMembers.length} Players`}
               </Button>
             </CardBody>
           </Card>
