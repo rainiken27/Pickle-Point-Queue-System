@@ -80,6 +80,19 @@ export async function POST(request: NextRequest) {
       finalGroupId = previousEntry?.group_id;
     }
 
+    // Verify the group still exists (it may have been deleted)
+    if (finalGroupId) {
+      const { data: groupExists } = await supabaseServer
+        .from('groups')
+        .select('id')
+        .eq('id', finalGroupId)
+        .single();
+
+      if (!groupExists) {
+        finalGroupId = null;
+      }
+    }
+
     // Get next position in queue
     const { data: maxPosition } = await supabaseServer
       .from('queue')
