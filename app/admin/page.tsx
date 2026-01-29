@@ -8,7 +8,7 @@ import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { CourtStatus, MatchSuggestion } from '@/types';
 import {
   PlayCircle, CheckCircle, Users, Clock, TrendingUp, BarChart3,
-  UserX, AlertTriangle, ChevronDown, ChevronRight, Zap, Activity, Search, Lock, Unlock, GripVertical, UserPlus
+  UserX, AlertTriangle, ChevronDown, ChevronRight, Zap, Activity, Search, Lock, Unlock, GripVertical, UserPlus, UserCheck
 } from 'lucide-react';
 import { getSkillLevelLabel } from '@/lib/utils/skillLevel';
 import { QRScanner } from '@/components/QRScanner';
@@ -56,12 +56,18 @@ function SortableQueueItem({ entry, countdown, onRemove }: any) {
       style={style}
       {...attributes}
       {...listeners}
-      className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 cursor-grab active:cursor-grabbing"
+      className={`rounded-lg shadow-sm border p-3 cursor-grab active:cursor-grabbing ${
+        entry.group_id 
+          ? 'bg-purple-50 border-purple-200' 
+          : 'bg-blue-50 border-blue-200'
+      }`}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3 flex-1">
           <GripVertical className="w-4 h-4 text-gray-400" />
-          <span className="font-bold text-sm text-blue-600">#{entry.position}</span>
+          <span className={`font-bold text-sm ${
+            entry.group_id ? 'text-purple-600' : 'text-blue-600'
+          }`}>#{entry.position}</span>
           
           {/* Player Photo */}
           <PlayerAvatar
@@ -73,10 +79,24 @@ function SortableQueueItem({ entry, countdown, onRemove }: any) {
           />
           
           <div className="flex-1 min-w-0 max-w-[120px]">
-            <p className="font-semibold text-sm truncate" title={entry.player.name}>{entry.player.name}</p>
+            <div className="flex items-center gap-2">
+              <p className="font-semibold text-sm truncate" title={entry.player.name}>{entry.player.name}</p>
+              {/* Visual indicator for group/solo */}
+              {entry.group_id ? (
+                <div className="flex items-center gap-1 px-1.5 py-0.5 bg-purple-200 text-purple-700 rounded-full text-xs font-medium">
+                  <Users className="w-3 h-3" />
+                  Group
+                </div>
+              ) : (
+                <div className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-200 text-blue-700 rounded-full text-xs font-medium">
+                  <UserCheck className="w-3 h-3" />
+                  Solo
+                </div>
+              )}
+            </div>
             <p className="text-xs text-gray-500">
               {getSkillLevelLabel(entry.player.skill_level)}
-              {entry.group_id ? ` • ${(entry as any).group?.name || 'Group'}` : ' • Solo'}
+              {entry.group_id && ` • ${(entry as any).group?.name || 'Group'}`}
             </p>
             {countdown && (
               <p className={`text-xs font-mono mt-0.5 ${

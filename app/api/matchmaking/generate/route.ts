@@ -26,6 +26,7 @@ export async function POST(request: NextRequest) {
     if (queueError) throw queueError;
 
     console.log(`[MATCHMAKING] ${queueData?.length || 0} waiting players in queue, match_type: ${match_type}`);
+    console.log(`[MATCHMAKING] Queue order:`, queueData?.map(e => `Pos ${e.position}: ${e.player?.name} (group_id: ${e.group_id || 'none'})`));
 
     let match;
 
