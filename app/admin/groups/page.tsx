@@ -19,6 +19,7 @@ export default function GroupsManagementPage() {
   const [groupToDelete, setGroupToDelete] = useState<GroupWithMembers | null>(null);
   const [newGroupName, setNewGroupName] = useState('');
   const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
+  const [playerSearchTerm, setPlayerSearchTerm] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -91,6 +92,7 @@ export default function GroupsManagementPage() {
       await fetchGroups();
       setNewGroupName('');
       setSelectedPlayers([]);
+      setPlayerSearchTerm('');
       setShowCreateModal(false);
       setSuccess(`Group "${newGroupName}" created successfully!`);
     } catch (err) {
@@ -532,6 +534,7 @@ export default function GroupsManagementPage() {
                   setShowCreateModal(false);
                   setNewGroupName('');
                   setSelectedPlayers([]);
+                  setPlayerSearchTerm('');
                   setError(null);
                 }}
                 className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
@@ -563,12 +566,28 @@ export default function GroupsManagementPage() {
                 </label>
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
                   <p className="text-sm text-blue-800">
-                    💡 Only players with active sessions can join groups
+                    Only players with active sessions can join groups
                   </p>
+                </div>
+                {/* Player Search */}
+                <div className="relative mb-3">
+                  <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search players by name..."
+                    value={playerSearchTerm}
+                    onChange={(e) => setPlayerSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base"
+                    autoComplete="off"
+                  />
                 </div>
                 <div className="border border-gray-300 rounded-lg p-4 max-h-96 overflow-y-auto space-y-2">
                   {players.length > 0 ? (
-                    players.map(player => (
+                    players
+                      .filter(player =>
+                        player.name.toLowerCase().includes(playerSearchTerm.toLowerCase())
+                      )
+                      .map(player => (
                       <label
                         key={player.id}
                         className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all ${
@@ -616,6 +635,13 @@ export default function GroupsManagementPage() {
                       <p className="text-sm mt-1">Players must check in at the cashier first</p>
                     </div>
                   )}
+                  {players.length > 0 && players.filter(p => p.name.toLowerCase().includes(playerSearchTerm.toLowerCase())).length === 0 && (
+                    <div className="text-center py-8 text-gray-500">
+                      <Search className="w-12 h-12 mx-auto mb-3 text-gray-400" />
+                      <p className="font-medium">No players match "{playerSearchTerm}"</p>
+                      <p className="text-sm mt-1">Try a different search term</p>
+                    </div>
+                  )}
                 </div>
                 <p className="text-sm text-gray-600 mt-2 flex items-center justify-between">
                   <span>Selected players:</span>
@@ -638,6 +664,7 @@ export default function GroupsManagementPage() {
                     setShowCreateModal(false);
                     setNewGroupName('');
                     setSelectedPlayers([]);
+                    setPlayerSearchTerm('');
                     setError(null);
                   }}
                   className="flex-1"
