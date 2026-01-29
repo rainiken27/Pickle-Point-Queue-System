@@ -1855,8 +1855,20 @@ export default function AdminDashboardRedesign() {
             </div>
             <div className="p-4 bg-white">
               <div className="grid grid-cols-3 gap-4">
-                {/* All courts in their natural order */}
-                {courts.map(court => renderCourt(court))}
+                {/* Occupied courts first (active matches) */}
+                {courts
+                  .filter(c => c.status === 'occupied')
+                  .map(court => renderCourt(court))}
+
+                {/* Available courts second */}
+                {courts
+                  .filter(c => c.status === 'available')
+                  .map(court => renderCourt(court))}
+
+                {/* Reserved courts last */}
+                {courts
+                  .filter(c => c.status === 'reserved')
+                  .map(court => renderCourt(court))}
               </div>
             </div>
           </div>

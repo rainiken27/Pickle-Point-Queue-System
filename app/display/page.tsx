@@ -361,7 +361,22 @@ export default function TVDisplay() {
                   )}
 
                   {court.status === 'reserved' && (
-                    <div className="text-lg text-white/90 text-center">Reserved</div>
+                    <div className="text-lg text-white/90 text-center">
+                      {(() => {
+                        const note = court.reserved_note && court.reserved_note.trim();
+                        const reservedBy = court.reserved_by && court.reserved_by.trim();
+                        
+                        if (note && reservedBy) {
+                          return `${note} (${reservedBy})`;
+                        } else if (note) {
+                          return note;
+                        } else if (reservedBy) {
+                          return `Reserved (${reservedBy})`;
+                        } else {
+                          return 'Reserved';
+                        }
+                      })()}
+                    </div>
                   )}
 
                   {court.status === 'occupied' && (

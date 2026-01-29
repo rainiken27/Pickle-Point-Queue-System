@@ -13,6 +13,9 @@ export interface Court {
     skill_level: number;
     photo_url: string | null;
   }> | null;
+  reserved_by?: string | null;
+  reserved_until?: string | null;
+  reserved_note?: string | null;
   created_at?: string;
   updated_at?: string;
 }
