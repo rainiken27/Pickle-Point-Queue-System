@@ -30,6 +30,12 @@ export default function GroupsManagementPage() {
       const response = await fetch('/api/groups');
       if (!response.ok) throw new Error('Failed to fetch groups');
       const data = await response.json();
+      console.log('[Group Debug] Fetched groups:', data.map((g: any) => ({ 
+        id: g.id, 
+        name: g.name, 
+        memberCount: g.member_count,
+        members: g.members?.map((m: any) => ({ id: m.player.id, name: m.player.name }))
+      })));
       setGroups(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch groups');
@@ -188,10 +194,38 @@ export default function GroupsManagementPage() {
     );
   };
 
-  // Get available players (not in the selected group)
+  // Get players not in any group (for group creation)
+  const getPlayersNotInAnyGroup = () => {
+    // Get all player IDs that are in ANY group
+    const allGroupMemberIds = new Set<string>();
+    groups.forEach(g => {
+      g.members?.forEach((m: any) => {
+        allGroupMemberIds.add(m.player.id);
+      });
+    });
+    
+    console.log('[Group Debug] All group member IDs:', Array.from(allGroupMemberIds));
+    console.log('[Group Debug] Total players:', players.length);
+    
+    // Filter out players who are already in any group
+    const availablePlayers = players.filter(p => !allGroupMemberIds.has(p.id));
+    console.log('[Group Debug] Available players:', availablePlayers.map(p => ({ id: p.id, name: p.name })));
+    
+    return availablePlayers;
+  };
+
+  // Get available players (not in any group)
   const getAvailablePlayers = (group: GroupWithMembers) => {
-    const memberIds = group.members?.map((m: any) => m.player.id) || [];
-    return players.filter(p => !memberIds.includes(p.id));
+    // Get all player IDs that are in ANY group
+    const allGroupMemberIds = new Set<string>();
+    groups.forEach(g => {
+      g.members?.forEach((m: any) => {
+        allGroupMemberIds.add(m.player.id);
+      });
+    });
+    
+    // Filter out players who are already in any group
+    return players.filter(p => !allGroupMemberIds.has(p.id));
   };
 
   // Filter groups by search term
@@ -609,11 +643,13 @@ export default function GroupsManagementPage() {
                   />
                 </div>
                 <div className="border border-gray-300 rounded-lg p-4 max-h-96 overflow-y-auto space-y-2">
-                  {players.length > 0 ? (
-                    players
-                      .filter(player =>
-                        player.name.toLowerCase().includes(playerSearchTerm.toLowerCase())
-                      )
+                  {(() => {
+                    const availablePlayers = getPlayersNotInAnyGroup();
+                    return availablePlayers.length > 0 ? (
+                      availablePlayers
+                        .filter(player =>
+                          player.name.toLowerCase().includes(playerSearchTerm.toLowerCase())
+                        )
                       .map(player => (
                       <label
                         key={player.id}
@@ -655,20 +691,27 @@ export default function GroupsManagementPage() {
                         </div>
                       </label>
                     ))
-                  ) : (
-                    <div className="text-center py-8 text-gray-500">
-                      <Users className="w-12 h-12 mx-auto mb-3 text-gray-400" />
-                      <p className="font-medium">No active players found</p>
-                      <p className="text-sm mt-1">Players must check in at the cashier first</p>
-                    </div>
-                  )}
-                  {players.length > 0 && players.filter(p => p.name.toLowerCase().includes(playerSearchTerm.toLowerCase())).length === 0 && (
-                    <div className="text-center py-8 text-gray-500">
-                      <Search className="w-12 h-12 mx-auto mb-3 text-gray-400" />
-                      <p className="font-medium">No players match "{playerSearchTerm}"</p>
-                      <p className="text-sm mt-1">Try a different search term</p>
-                    </div>
-                  )}
+                    ) : (
+                      <div className="text-center py-8 text-gray-500">
+                        <Users className="w-12 h-12 mx-auto mb-3 text-gray-400" />
+                        <p className="font-medium">No available players found</p>
+                        <p className="text-sm mt-1">All players are already in groups</p>
+                      </div>
+                    );
+                  })()}
+                  {(() => {
+                    const availablePlayers = getPlayersNotInAnyGroup();
+                    const filteredPlayers = availablePlayers.filter(p => 
+                      p.name.toLowerCase().includes(playerSearchTerm.toLowerCase())
+                    );
+                    return availablePlayers.length > 0 && filteredPlayers.length === 0 && (
+                      <div className="text-center py-8 text-gray-500">
+                        <Search className="w-12 h-12 mx-auto mb-3 text-gray-400" />
+                        <p className="font-medium">No players match "{playerSearchTerm}"</p>
+                        <p className="text-sm mt-1">Try a different search term</p>
+                      </div>
+                    );
+                  })()}
                 </div>
                 <p className="text-sm text-gray-600 mt-2 flex items-center justify-between">
                   <span>Selected players:</span>

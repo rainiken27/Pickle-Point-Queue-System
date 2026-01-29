@@ -8,17 +8,21 @@ export async function GET() {
       .from('groups')
       .select(`
         *,
-        members:group_members(count)
+        members:group_members(
+          id,
+          player_id,
+          joined_at,
+          player:players(*)
+        )
       `)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
 
-    // Transform the data to include member_count
+    // Transform the data to include member_count and keep members
     const groupsWithCounts = groups?.map(group => ({
       ...group,
-      member_count: group.members[0]?.count || 0,
-      members: undefined, // Remove the raw count object
+      member_count: group.members?.length || 0,
     }));
 
     return NextResponse.json(groupsWithCounts || []);

@@ -33,6 +33,52 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
+// Generate consistent color for groups based on their name/id
+const getGroupColor = (group: { id: string; name: string } | null) => {
+  if (!group) return { text: 'text-green-600', dot: 'bg-green-500' }; // Solo color
+  
+  // Use group name + id for consistent hashing
+  const hash = group.name + group.id;
+  let hashNum = 0;
+  for (let i = 0; i < hash.length; i++) {
+    hashNum = ((hashNum << 5) - hashNum) + hash.charCodeAt(i);
+    hashNum = hashNum & hashNum; // Convert to 32-bit integer
+  }
+  
+  // 10 distinct colors for groups
+  const colors = [
+    'text-yellow-600',   // Yellow
+    'text-blue-600',     // Blue
+    'text-purple-600',   // Purple
+    'text-pink-600',     // Pink
+    'text-indigo-600',   // Indigo
+    'text-orange-600',  // Orange
+    'text-teal-600',     // Teal
+    'text-red-600',      // Red
+    'text-cyan-600',     // Cyan
+    'text-emerald-600',  // Emerald
+  ];
+  
+  const dotColors = [
+    'bg-yellow-500',
+    'bg-blue-500',
+    'bg-purple-500',
+    'bg-pink-500',
+    'bg-indigo-500',
+    'bg-orange-500',
+    'bg-teal-500',
+    'bg-red-500',
+    'bg-cyan-500',
+    'bg-emerald-500',
+  ];
+  
+  const index = Math.abs(hashNum) % colors.length;
+  return {
+    text: colors[index],
+    dot: dotColors[index]
+  };
+};
+
 // Sortable Queue Item Component
 function SortableQueueItem({ entry, countdown, onRemove }: any) {
   const {
@@ -58,7 +104,7 @@ function SortableQueueItem({ entry, countdown, onRemove }: any) {
       {...listeners}
       className={`rounded-lg shadow-sm border p-3 cursor-grab active:cursor-grabbing ${
         entry.group_id 
-          ? 'bg-yellow-50 border-yellow-200' 
+          ? `${getGroupColor((entry as any).group).text.replace('text-', 'bg-').replace('600', '50')} border-${getGroupColor((entry as any).group).text.replace('text-', '').replace('600', '200')}` 
           : 'bg-green-50 border-green-200'
       }`}
     >
@@ -68,10 +114,10 @@ function SortableQueueItem({ entry, countdown, onRemove }: any) {
           <div className="flex items-center gap-2">
             {/* Colored circle indicator */}
             <div className={`w-3 h-3 rounded-full ${
-              entry.group_id ? 'bg-yellow-500' : 'bg-green-500'
+              entry.group_id ? getGroupColor((entry as any).group).dot : 'bg-green-500'
             }`} />
             <span className={`font-bold text-sm ${
-              entry.group_id ? 'text-yellow-600' : 'text-green-600'
+              entry.group_id ? getGroupColor((entry as any).group).text : 'text-green-600'
             }`}>#{entry.position}</span>
           </div>
           
@@ -89,11 +135,11 @@ function SortableQueueItem({ entry, countdown, onRemove }: any) {
             <p className="text-xs text-gray-500 truncate" title={entry.group_id ? `Group (${(entry as any).group?.name || 'Group'}) • ${getSkillLevelLabel(entry.player.skill_level)}` : `Solo • ${getSkillLevelLabel(entry.player.skill_level)}`}>
               {entry.group_id ? (
                 <span className="flex items-center gap-1">
-                  <span className="text-yellow-600 font-medium whitespace-nowrap">Group</span>
+                  <span className={`${getGroupColor((entry as any).group).text} font-medium whitespace-nowrap`}>Group</span>
                   <span className="text-gray-500"> (</span>
-                  <span className="text-yellow-600 truncate">{(entry as any).group?.name || 'Group'}</span>
+                  <span className={`${getGroupColor((entry as any).group).text} truncate`}>{(entry as any).group?.name || 'Group'}</span>
                   <span className="text-gray-500">)</span>
-                  <span className={`inline-block w-1.5 h-1.5 rounded-full bg-yellow-500 flex-shrink-0`}></span>
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${getGroupColor((entry as any).group).dot} flex-shrink-0`}></span>
                   <span className="whitespace-nowrap">{getSkillLevelLabel(entry.player.skill_level)}</span>
                 </span>
               ) : (
@@ -558,28 +604,23 @@ export default function AdminDashboardRedesign() {
     const session = sessions[playerId];
     if (!session) return null;
 
-    // Check if player has unlimited time
-    if (session.players?.unlimited_time) {
-      return '∞';
-    }
-
-    const startTime = new Date(session.start_time).getTime();
+    const elapsed = Date.now() - new Date(session.start_time).getTime();
     const fiveHoursInMs = 5 * 60 * 60 * 1000;
-    const elapsed = currentTime.getTime() - startTime;
     const remaining = fiveHoursInMs - elapsed;
 
-    if (remaining <= 0) return '0:00:00';
+    if (remaining <= 0) return '00:00:00';
 
-    const hours = Math.floor(remaining / (60 * 60 * 1000));
-    const minutes = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
-    const seconds = Math.floor((remaining % (60 * 1000)) / 1000);
+    const hours = Math.floor(remaining / (1000 * 60 * 60));
+    const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((remaining % (1000 * 60)) / 1000);
 
-    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
 
   const getCourtTimerCountdown = (court: any) => {
     if (!court.court_timer_started_at) return null;
 
+    // ... (rest of the code remains the same)
     const startTime = new Date(court.court_timer_started_at).getTime();
     const twentyMinutesInMs = 20 * 60 * 1000; // 20 minutes for production
     const elapsed = currentTime.getTime() - startTime;
