@@ -480,11 +480,16 @@ export default function AdminDashboardRedesign() {
       return;
     }
 
-    const confirmed = confirm(
-      `${noShows.length} player(s) didn't show up:\n${noShows.map(p => `- ${p.name}`).join('\n')}\n\nRemove them and call replacements?`
+    // Ask user what to do with no-shows
+    const choice = prompt(
+      `${noShows.length} player(s) didn't show up:\n${noShows.map(p => `- ${p.name}`).join('\n')}\n\nChoose action:\n1 = Move to BOTTOM of queue (they keep waiting)\n2 = REMOVE from queue completely\n\nEnter 1 or 2:`
     );
 
-    if (!confirmed) return;
+    if (!choice || (choice !== '1' && choice !== '2')) {
+      return; // Cancelled
+    }
+
+    const moveToBottom = choice === '1';
 
     try {
       for (const player of noShows) {
@@ -496,6 +501,7 @@ export default function AdminDashboardRedesign() {
             body: JSON.stringify({
               queue_id: queueEntry.id,
               reason: 'no_show',
+              move_to_bottom: moveToBottom,
             }),
           });
         }
@@ -505,9 +511,13 @@ export default function AdminDashboardRedesign() {
       setMatchSuggestions({ ...matchSuggestions, [courtId]: null });
       setVerifiedPlayers({ ...verifiedPlayers, [courtId]: new Set() });
 
-      alert(`${noShows.length} no-show(s) removed. Click "Call Next" again to get ${noShows.length} replacement(s).`);
+      if (moveToBottom) {
+        alert(`${noShows.length} no-show(s) moved to bottom of queue. Click "Call Next" again to get replacement(s).`);
+      } else {
+        alert(`${noShows.length} no-show(s) removed from queue. Click "Call Next" again to get replacement(s).`);
+      }
     } catch (error) {
-      alert('Failed to replace no-shows: ' + (error as Error).message);
+      alert('Failed to handle no-shows: ' + (error as Error).message);
     }
   };
 

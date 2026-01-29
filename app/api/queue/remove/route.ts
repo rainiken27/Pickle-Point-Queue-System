@@ -2,15 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabase/server';
 
 /**
- * Manually remove a player from the queue
+ * Manually remove a player from the queue or move them to the bottom
  * Used when player leaves unexpectedly or doesn't show up
+ *
+ * Options:
+ * - move_to_bottom: true = move player to last position instead of removing
+ * - end_session: true = also end their session (only for removals)
  */
 export async function POST(request: NextRequest) {
   console.log('[Queue Removal API] Starting queue removal request');
-  
+
   try {
-    const { queue_id, reason, end_session } = await request.json();
-    console.log('[Queue Removal API] Request data:', { queue_id, reason, end_session });
+    const { queue_id, reason, end_session, move_to_bottom } = await request.json();
+    console.log('[Queue Removal API] Request data:', { queue_id, reason, end_session, move_to_bottom });
 
     if (!queue_id) {
       console.log('[Queue Removal API] Missing queue_id');
@@ -43,6 +47,43 @@ export async function POST(request: NextRequest) {
       position: queueEntry.position,
       status: queueEntry.status
     });
+
+    // If move_to_bottom is true, move player to last position instead of removing
+    if (move_to_bottom === true) {
+      // Get the highest current position
+      const { data: lastEntry } = await supabaseServer
+        .from('queue')
+        .select('position')
+        .eq('status', 'waiting')
+        .order('position', { ascending: false })
+        .limit(1)
+        .single();
+
+      const newPosition = (lastEntry?.position || 0) + 1;
+
+      // Update the player's position to the end
+      const { error: updateError } = await supabaseServer
+        .from('queue')
+        .update({ position: newPosition })
+        .eq('id', queue_id);
+
+      if (updateError) throw updateError;
+
+      console.log(`[Queue Removal API] Moved ${queueEntry.player.name} to bottom of queue (position ${newPosition})`);
+
+      // Recalculate positions to fill any gaps
+      await recalculateQueuePositions();
+
+      return NextResponse.json(
+        {
+          message: `${queueEntry.player.name} moved to bottom of queue`,
+          player_name: queueEntry.player.name,
+          new_position: newPosition,
+          action: 'moved_to_bottom',
+        },
+        { status: 200 }
+      );
+    }
 
     // Complete the player's session ONLY if explicitly requested
     // end_session = true: Player left facility / no-show (complete session)
