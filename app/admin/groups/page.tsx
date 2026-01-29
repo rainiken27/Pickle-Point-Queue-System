@@ -20,6 +20,7 @@ export default function GroupsManagementPage() {
   const [newGroupName, setNewGroupName] = useState('');
   const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
   const [playerSearchTerm, setPlayerSearchTerm] = useState('');
+  const [addPlayerSearchTerm, setAddPlayerSearchTerm] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -220,7 +221,10 @@ export default function GroupsManagementPage() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <button
-                  onClick={() => setSelectedGroup(null)}
+                  onClick={() => {
+                    setSelectedGroup(null);
+                    setAddPlayerSearchTerm('');
+                  }}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                 >
                   <ArrowLeft className="w-5 h-5" />
@@ -327,9 +331,25 @@ export default function GroupsManagementPage() {
                 <h2 className="text-xl font-bold mb-4">
                   Add Active Player ({4 - selectedGroup.member_count} slot{4 - selectedGroup.member_count !== 1 ? 's' : ''} available)
                 </h2>
+                {/* Player Search */}
+                {availablePlayers.length > 0 && (
+                  <div className="relative mb-4">
+                    <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Search players by name..."
+                      value={addPlayerSearchTerm}
+                      onChange={(e) => setAddPlayerSearchTerm(e.target.value)}
+                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-base"
+                      autoComplete="off"
+                    />
+                  </div>
+                )}
                 <div className="space-y-3">
                   {availablePlayers.length > 0 ? (
-                    availablePlayers.map(player => (
+                    availablePlayers
+                      .filter(player => player.name.toLowerCase().includes(addPlayerSearchTerm.toLowerCase()))
+                      .map(player => (
                       <div key={player.id} onClick={() => handleAddMember(selectedGroup.id, player.id)} className="cursor-pointer">
                         <Card className="hover:border-green-300 transition-colors">
                           <CardBody className="p-4">
@@ -363,6 +383,13 @@ export default function GroupsManagementPage() {
                       <Users className="w-12 h-12 mx-auto mb-3 text-gray-400" />
                       <p className="text-gray-600">No additional active players available</p>
                       <p className="text-sm text-gray-500 mt-1">Players must have active sessions to join groups</p>
+                    </div>
+                  )}
+                  {availablePlayers.length > 0 && availablePlayers.filter(p => p.name.toLowerCase().includes(addPlayerSearchTerm.toLowerCase())).length === 0 && (
+                    <div className="text-center py-8 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
+                      <Search className="w-12 h-12 mx-auto mb-3 text-gray-400" />
+                      <p className="text-gray-600">No players match "{addPlayerSearchTerm}"</p>
+                      <p className="text-sm text-gray-500 mt-1">Try a different search term</p>
                     </div>
                   )}
                 </div>
