@@ -57,6 +57,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Determine group_id (if player is a member of a group)
+    const { data: groupMembership } = await supabaseServer
+      .from('group_members')
+      .select('group_id')
+      .eq('player_id', playerId)
+      .maybeSingle();
+
+    let finalGroupId: string | null = groupMembership?.group_id || null;
+
+    // Verify group exists (in case membership is stale)
+    if (finalGroupId) {
+      const { data: groupExists } = await supabaseServer
+        .from('groups')
+        .select('id')
+        .eq('id', finalGroupId)
+        .maybeSingle();
+
+      if (!groupExists) {
+        finalGroupId = null;
+      }
+    }
+
     // Calculate next position
     const { data: lastQueueEntry, error: positionError } = await supabaseServer
       .from('queue')
@@ -75,6 +97,7 @@ export async function POST(request: NextRequest) {
         player_id: playerId,
         position: nextPosition,
         status: 'waiting',
+        group_id: finalGroupId,
       })
       .select(`
         *,
