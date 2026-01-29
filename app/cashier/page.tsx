@@ -27,6 +27,7 @@ export default function CashierPage() {
 
   // Group mode state
   const [groupMembers, setGroupMembers] = useState<GroupMember[]>([]);
+  const [groupName, setGroupName] = useState('');
   const [currentScanQr, setCurrentScanQr] = useState('');
 
   // Name search state
@@ -336,7 +337,7 @@ export default function CashierPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: `Group ${new Date().toLocaleTimeString()}`,
+          name: groupName.trim() || `Group ${new Date().toLocaleTimeString()}`,
           member_ids: groupMembers.map(m => m.id),
         }),
       });
@@ -401,6 +402,7 @@ export default function CashierPage() {
       // Reset after 3 seconds
       setTimeout(() => {
         setGroupMembers([]);
+        setGroupName('');
         setCurrentScanQr('');
         setSessionStarted(false);
         setSuccessMessage('');
@@ -464,6 +466,7 @@ export default function CashierPage() {
                   onClick={() => {
                     setIsGroupMode(false);
                     setGroupMembers([]);
+                    setGroupName('');
                     setCurrentScanQr('');
                   }}
                 >
@@ -613,6 +616,22 @@ export default function CashierPage() {
               </h2>
             </CardHeader>
             <CardBody>
+              {/* Group Name Input */}
+              <div className="mb-4">
+                <label className="text-sm font-medium text-gray-700 mb-2 block">
+                  Group Name (optional)
+                </label>
+                <Input
+                  placeholder="Enter a name for this group..."
+                  value={groupName}
+                  onChange={(e) => setGroupName(e.target.value)}
+                  maxLength={50}
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Leave blank for auto-generated name
+                </p>
+              </div>
+
               <div className="space-y-3">
                 {groupMembers.map((member, index) => (
                   <div key={member.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
