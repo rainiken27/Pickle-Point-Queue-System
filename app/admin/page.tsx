@@ -297,20 +297,67 @@ export default function AdminDashboardRedesign() {
     }
   };
 
+  const syncQueueGroupIdsFromMemberships = async () => {
+    try {
+      const waiting = queueEntriesRef.current.filter((e: any) => e.status === 'waiting');
+      if (!waiting.length) return;
+
+      const playerIds = waiting.map((e: any) => e.player_id);
+      const { supabase } = await import('@/lib/supabase/client');
+
+      const { data: memberships, error: membershipError } = await supabase
+        .from('group_members')
+        .select('player_id, group_id')
+        .in('player_id', playerIds);
+
+      if (membershipError) {
+        console.error('[Group Sync] Failed to load group memberships:', membershipError);
+        return;
+      }
+
+      const membershipMap = new Map<string, string>();
+      (memberships || []).forEach((m: any) => {
+        if (m?.player_id && m?.group_id) membershipMap.set(m.player_id, m.group_id);
+      });
+
+      const toFix = waiting.filter((e: any) => !e.group_id && membershipMap.has(e.player_id));
+      if (!toFix.length) return;
+
+      console.warn(`[Group Sync] Fixing ${toFix.length} queue entr${toFix.length === 1 ? 'y' : 'ies'} with missing group_id`);
+
+      for (const entry of toFix) {
+        const groupId = membershipMap.get(entry.player_id);
+        if (!groupId) continue;
+
+        const { error: updateError } = await supabase
+          .from('queue')
+          .update({ group_id: groupId })
+          .eq('id', entry.id)
+          .is('group_id', null);
+
+        if (updateError) {
+          console.error('[Group Sync] Failed to update queue entry group_id:', {
+            queue_id: entry.id,
+            player_id: entry.player_id,
+            group_id: groupId,
+            error: updateError,
+          });
+        }
+      }
+
+      await fetchQueue();
+    } catch (error) {
+      console.error('[Group Sync] Unexpected error:', error);
+    }
+  };
+
   // Check group membership integrity
   const checkGroupMembershipIntegrity = async () => {
     console.log('[Group Integrity] Checking group membership integrity...');
     
     try {
-      // Get all players who are in queue
-      const queueResponse = await fetch('/api/queue');
-      if (!queueResponse.ok) {
-        console.error('[Group Integrity] Failed to fetch queue');
-        return;
-      }
-      
-      const queueData = await queueResponse.json();
-      const queuePlayers = queueData.filter((entry: any) => entry.status === 'waiting');
+      const queuePlayers = queueEntriesRef.current.filter((entry: any) => entry.status === 'waiting');
+      if (!queuePlayers.length) return;
       
       // Get all group memberships
       const { data: groupMemberships } = await (await import('@/lib/supabase/client')).supabase
@@ -399,11 +446,12 @@ export default function AdminDashboardRedesign() {
   }, []);
 
   useEffect(() => {
-    fetchCourts();
-    fetchQueue();
-
-    // Check group membership integrity
-    checkGroupMembershipIntegrity();
+    (async () => {
+      await fetchCourts();
+      await fetchQueue();
+      await syncQueueGroupIdsFromMemberships();
+      await checkGroupMembershipIntegrity();
+    })();
 
     // Update every second for countdowns
     const updateInterval = setInterval(() => {
