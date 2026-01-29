@@ -314,29 +314,27 @@ export default function TVDisplay() {
       }}
     >
       {/* Header */}
-      <div className="grid grid-cols-3 items-center mb-3 shrink-0">
+      <div className="grid grid-cols-3 items-center mb-4 shrink-0">
         <div className="justify-self-start">
-          <img src="/logo.png" alt="PicklePoint Queue" className="h-26 w-auto" />
+          <img src="/logo.png" alt="PicklePoint Queue" className="h-28 w-auto" />
         </div>
-        <div className="text-5xl font-bold justify-self-center" suppressHydrationWarning>
+        <div className="text-6xl font-bold justify-self-center" suppressHydrationWarning>
           {currentTime.toLocaleTimeString()}
         </div>
-        <div className="flex flex-col items-end justify-self-end">
-          <div className="text-xl" suppressHydrationWarning>
+        <div className="flex items-center gap-4 justify-self-end">
+          <div className="text-2xl" suppressHydrationWarning>
             {currentTime.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
-          </div>
-          <div className="text-xl font-semibold text-white/90 flex items-center gap-2">
-            <Users className="w-6 h-6" />
-            Queue ({waitingQueue.length})
           </div>
         </div>
       </div>
 
+
       {/* Main Content - Courts and Queue */}
-      <div className="flex flex-col gap-2 flex-1 min-h-0">
-        {/* Courts - Top Strip */}
-        <div className="bg-black/25 backdrop-blur-md p-1 rounded-lg border border-white/10 shrink-0">
-          <div className="grid grid-cols-6 gap-1">
+      <div className="grid gap-4 flex-1 min-h-0" style={{ gridTemplateColumns: '55% 45%' }}>
+        {/* Courts - Takes 55% width */}
+        <div className="bg-black/25 backdrop-blur-md p-4 rounded-lg border border-white/10">
+          <h3 className="text-2xl font-semibold text-white/90 mb-4">Courts</h3>
+          <div className="grid grid-cols-2 gap-3">
             {courts.slice(0, 6).map(court => {
               const courtPlayers = getCourtPlayers(court.id);
               const courtTimerMs = court.court_timer_started_at
@@ -346,7 +344,7 @@ export default function TVDisplay() {
               return (
                 <div
                   key={court.id}
-                  className={`p-2 rounded-lg relative overflow-hidden ${
+                  className={`p-4 rounded-lg ${
                     court.status === 'available'
                       ? 'bg-amber-500'
                       : court.status === 'reserved'
@@ -354,36 +352,20 @@ export default function TVDisplay() {
                       : 'bg-red-600'
                   }`}
                 >
-                  {court.status === 'occupied' ? (
-                    <div className={`text-lg font-bold text-white text-center mb-1 ${
-                      courtTimerMs !== null && courtTimerMs < 5 * 60 * 1000 ? 'text-yellow-300' : ''
-                    }`}>
-                      Court {court.court_number}
-                      {courtTimerMs !== null && (
-                        <>
-                          {' '}•{' '}
-                          <span className="font-mono">
-                            {formatCountdownMs(courtTimerMs)}
-                          </span>
-                        </>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-base font-bold text-white text-center mb-1">
-                      Court {court.court_number}
-                    </div>
-                  )}
+                  <div className="text-3xl font-bold text-white text-center mb-2">
+                    Court {court.court_number}
+                  </div>
 
                   {court.status === 'available' && (
-                    <div className="text-sm text-white/90 text-center">Open</div>
+                    <div className="text-lg text-white/90 text-center">Open</div>
                   )}
 
                   {court.status === 'reserved' && (
-                    <div className="text-sm text-white/90 text-center">
+                    <div className="text-lg text-white/90 text-center">
                       {(() => {
                         const note = court.reserved_note && court.reserved_note.trim();
                         const reservedBy = court.reserved_by && court.reserved_by.trim();
-
+                        
                         if (note && reservedBy) {
                           return `${note} (${reservedBy})`;
                         } else if (note) {
@@ -399,17 +381,27 @@ export default function TVDisplay() {
 
                   {court.status === 'occupied' && (
                     <>
+                      {/* Court Timer */}
+                      {courtTimerMs !== null && (
+                        <div className={`text-center mb-2 ${
+                          courtTimerMs < 5 * 60 * 1000 ? 'text-yellow-300 font-bold' : 'text-white/90'
+                        }`}>
+                          <Clock className="w-5 h-5 inline mr-1" />
+                          {formatCountdownMs(courtTimerMs)}
+                        </div>
+                      )}
+
                       {/* 4 Player Photos (horizontal line, centered) */}
                       {courtPlayers.length > 0 && (
-                        <div className="flex justify-center items-center gap-0.5 mt-1">
+                        <div className="flex justify-center items-center gap-2 mt-2">
                           {courtPlayers.map((entry) => (
                             <PlayerAvatar
                               key={entry.id}
                               name={entry.player.name}
                               photo_url={entry.player.photo_url}
                               display_photo={(entry as any).session?.display_photo}
-                              size="md"
-                              className="border-2 border-white/40 flex-shrink-0"
+                              size="lg"
+                              className="border-2 border-white/40"
                             />
                           ))}
                         </div>
@@ -422,36 +414,91 @@ export default function TVDisplay() {
           </div>
         </div>
 
-        {/* Queue - Full Height Below */}
-        <div className="bg-black/25 backdrop-blur-md p-4 rounded-lg border border-white/10 flex flex-col min-h-0 flex-1">
+        {/* Queue - Takes 45% width */}
+        <div className="bg-black/25 backdrop-blur-md p-4 rounded-lg border border-white/10 flex flex-col min-h-0">
+          <h3 className="text-3xl font-semibold text-white mb-4 flex items-center gap-2 shrink-0">
+            <Users className="w-10 h-10" />
+            Queue ({waitingQueue.length})
+          </h3>
+
           {waitingQueue.length === 0 ? (
             <div className="text-center py-8 flex-1 flex items-center justify-center">
               <p className="text-white/50 text-2xl font-medium">No players waiting</p>
             </div>
           ) : (
-            <div className="overflow-y-auto flex-1 pr-2 flex flex-wrap gap-4 content-start">
+            <div className="space-y-4 overflow-y-auto flex-1 pr-2">
               {(() => {
                 const displayUnits = createDisplayUnits(waitingQueue, availableCourts);
                 let positionCounter = 1;
-
+                
                 return displayUnits.map((unit, unitIndex) => (
                   <div
                     key={`unit-${unitIndex}`}
-                    className={`w-[calc(33.333%-1rem)] p-4 rounded-lg transition-all border-2 ${
+                    className={`p-4 rounded-lg transition-all border-2 ${
                       unit.isComplete
-                        ? 'bg-amber-500/20 border-amber-400/60 shadow-lg shadow-amber-500/20'
+                        ? 'bg-amber-500/20 border-amber-400/60 shadow-lg shadow-amber-500/20' // Gold outline for complete groups
                         : unitIndex === 0
                         ? 'bg-yellow-500/30 border-yellow-400/40'
                         : 'bg-white/5 border-white/10'
                     }`}
                   >
+                    {/* Unit Header */}
+                    {unit.type === 'group' && (
+                      <div className="text-center mb-2">
+                        <span className={`text-sm font-bold px-2 py-1 rounded ${
+                          unit.isComplete 
+                            ? 'bg-amber-500 text-white' 
+                            : 'bg-blue-500 text-white'
+                        }`}>
+                          {unit.groupName} {unit.isComplete ? '(Ready!)' : `(${unit.players.length}/4)`}
+                        </span>
+                      </div>
+                    )}
+                    
+                    {unit.type === 'solo_stack' && (
+                      <div className="text-center mb-2">
+                        <span className={`text-sm font-bold px-2 py-1 rounded ${
+                          unit.isComplete
+                            ? 'bg-amber-500 text-white'
+                            : unit.groupName
+                            ? 'bg-blue-500 text-white'
+                            : 'bg-gray-600 text-white'
+                        }`}>
+                          {unit.groupName ? (
+                            // Mixed unit with group members
+                            <>
+                              {unit.groupName}
+                              {(() => {
+                                // Count solo players (those not in the group)
+                                const soloCount = unit.players.filter(p => !p.group_id).length;
+                                if (soloCount > 0) {
+                                  return ` + ${soloCount} Solo`;
+                                }
+                                return '';
+                              })()}
+                              {' '}
+                              {unit.isComplete ? '(Ready!)' : `(${unit.players.length}/4)`}
+                            </>
+                          ) : (
+                            // Pure solo stack
+                            unit.players.length === 1
+                              ? 'Needs 3 More Players'
+                              : unit.players.length === 2
+                              ? 'Needs 2 More Players'
+                              : unit.players.length === 3
+                              ? 'Needs 1 More Player'
+                              : 'Solo Stack (Ready!)'
+                          )}
+                        </span>
+                      </div>
+                    )}
+
                     {/* Players in this unit */}
                     <div className="space-y-2">
                       {unit.players.map((entry) => {
                         const sessionCountdown = getSessionCountdown(entry.player_id);
                         const currentPosition = positionCounter++;
-                        const groupLabel = unit.groupName || 'Solo';
-
+                        
                         return (
                           <div key={entry.id} className="flex items-center gap-2">
                             <span className="font-bold text-white text-xl w-10">#{currentPosition}</span>
@@ -470,8 +517,9 @@ export default function TVDisplay() {
                               <div className="font-bold text-white truncate text-xl">
                                 {entry.player.name}
                               </div>
-                              <div className="text-base text-white/80 font-medium truncate">
-                                {groupLabel} • {getSkillLevelLabel(entry.player.skill_level)}
+                              {/* Skill Level */}
+                              <div className="text-base text-white/80 font-medium">
+                                {getSkillLevelLabel(entry.player.skill_level)}
                               </div>
                             </div>
 
@@ -485,7 +533,7 @@ export default function TVDisplay() {
                           </div>
                         );
                       })}
-
+                      
                       {/* Placeholder spots for incomplete units */}
                       {unit.placeholderCount > 0 && (
                         <div className="space-y-2">
@@ -494,14 +542,16 @@ export default function TVDisplay() {
                             return (
                               <div key={`placeholder-${i}`} className="flex items-center gap-2 opacity-50">
                                 <span className="font-bold text-white text-xl w-10">#{currentPosition}</span>
-
+                                
                                 {/* Empty placeholder circle */}
                                 <div className="w-16 h-16 rounded-full border-2 border-dashed border-white/40 shrink-0 flex items-center justify-center">
                                   <span className="text-white/60 text-sm">?</span>
                                 </div>
-
+                                
                                 <div className="flex-1 min-w-0">
-                                  <div className="text-white/60 text-xl italic">Waiting for player...</div>
+                                  <div className="text-white/60 text-xl italic">
+                                    Waiting for player...
+                                  </div>
                                 </div>
                               </div>
                             );
@@ -516,6 +566,7 @@ export default function TVDisplay() {
           )}
         </div>
       </div>
+
     </div>
   );
 }
