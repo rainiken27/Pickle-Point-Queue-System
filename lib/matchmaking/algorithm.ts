@@ -322,14 +322,16 @@ export class MatchmakingEngine {
         if (result.length === 4) {
           return result;
         }
-      } else {
-        // This unit would exceed 4 players, skip it
-        // But if we don't have enough players yet, we can't form a match
-        break;
       }
+      // If unit doesn't fit, continue to try next unit (don't break)
     }
 
-    // If we don't have exactly 4 players, this combination doesn't work
+    // If we have exactly 4 players, return the match
+    if (result.length === 4) {
+      return result;
+    }
+
+    // Not enough players to form a match
     return null;
   }
 
