@@ -81,16 +81,23 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
       // If no group_id provided, check if player is member of a permanent group
       let finalGroupId = group_id;
       if (!finalGroupId) {
-        const { data: groupMembership } = await supabase
+        console.log(`[Queue] Checking group membership for player ${player_id}`);
+        const { data: groupMembership, error: groupError } = await supabase
           .from('group_members')
           .select('group_id')
           .eq('player_id', player_id)
           .single();
 
-        if (groupMembership) {
+        if (groupError) {
+          console.log(`[Queue] No group membership found for player ${player_id}:`, groupError);
+        } else if (groupMembership) {
           finalGroupId = groupMembership.group_id;
-          console.log(`[Queue] Player is member of group ${finalGroupId}`);
+          console.log(`[Queue] Player ${player_id} is member of group ${finalGroupId}`);
+        } else {
+          console.log(`[Queue] Player ${player_id} is not in any group`);
         }
+      } else {
+        console.log(`[Queue] Player ${player_id} added with explicit group_id: ${finalGroupId}`);
       }
 
       // Calculate next position by checking database (single facility queue)

@@ -297,6 +297,96 @@ export default function AdminDashboardRedesign() {
     }
   };
 
+  // Check group membership integrity
+  const checkGroupMembershipIntegrity = async () => {
+    console.log('[Group Integrity] Checking group membership integrity...');
+    
+    try {
+      // Get all players who are in queue
+      const queueResponse = await fetch('/api/queue');
+      if (!queueResponse.ok) {
+        console.error('[Group Integrity] Failed to fetch queue');
+        return;
+      }
+      
+      const queueData = await queueResponse.json();
+      const queuePlayers = queueData.filter((entry: any) => entry.status === 'waiting');
+      
+      // Get all group memberships
+      const { data: groupMemberships } = await (await import('@/lib/supabase/client')).supabase
+        .from('group_members')
+        .select('player_id, group_id, groups!inner(name)');
+      
+      // Create a map of player_id -> group_id
+      const playerToGroupMap = new Map();
+      groupMemberships?.forEach((membership: any) => {
+        playerToGroupMap.set(membership.player_id, {
+          group_id: membership.group_id,
+          group_name: membership.groups?.name || 'Unknown Group'
+        });
+      });
+      
+      // Check each queue player
+      const issues: Array<{
+        player_name: string;
+        player_id: string;
+        queue_group_id: string | null;
+        expected_group_id: string | null;
+        group_name: string | null;
+      }> = [];
+      
+      for (const queueEntry of queuePlayers) {
+        const player = queueEntry.player;
+        const queueGroupId = queueEntry.group_id;
+        const expectedGroup = playerToGroupMap.get(player.id);
+        
+        if (expectedGroup) {
+          // Player should be in a group
+          if (queueGroupId !== expectedGroup.group_id) {
+            issues.push({
+              player_name: player.name,
+              player_id: player.id,
+              queue_group_id: queueGroupId,
+              expected_group_id: expectedGroup.group_id,
+              group_name: expectedGroup.group_name
+            });
+          }
+        } else {
+          // Player should not be in a group
+          if (queueGroupId) {
+            issues.push({
+              player_name: player.name,
+              player_id: player.id,
+              queue_group_id: queueGroupId,
+              expected_group_id: null,
+              group_name: null
+            });
+          }
+        }
+      }
+      
+      if (issues.length > 0) {
+        console.warn('[Group Integrity] Found group membership issues:');
+        issues.forEach(issue => {
+          console.warn(`- ${issue.player_name} (${issue.player_id}):`);
+          console.warn(`  Queue group_id: ${issue.queue_group_id}`);
+          console.warn(`  Expected group_id: ${issue.expected_group_id}`);
+          console.warn(`  Group name: ${issue.group_name || 'N/A'}`);
+        });
+        
+        // Show alert to admin
+        alert(`⚠️ Group Membership Issues Found:\n${issues.map(issue => 
+          `• ${issue.player_name}: Should be in ${issue.group_name || 'group ' + issue.expected_group_id?.slice(0, 8)} but has group_id ${issue.queue_group_id || 'null'}`
+        ).join('\n')}\n\nPlease check the group_members table.`);
+      } else {
+        console.log('[Group Integrity] ✅ All players have correct group assignments');
+      }
+      
+    } catch (error) {
+      console.error('[Group Integrity] Error checking group membership:', error);
+    }
+  };
+
   // Hydrate store on mount
   useEffect(() => {
     const { useStore } = require('@/store');
@@ -311,6 +401,9 @@ export default function AdminDashboardRedesign() {
   useEffect(() => {
     fetchCourts();
     fetchQueue();
+
+    // Check group membership integrity
+    checkGroupMembershipIntegrity();
 
     // Update every second for countdowns
     const updateInterval = setInterval(() => {
@@ -1666,6 +1759,7 @@ export default function AdminDashboardRedesign() {
                 >
                   {filteredQueue.map((entry) => {
                     const countdown = getSessionCountdown(entry.player_id);
+                    console.log(`[Queue Debug] Player: ${entry.player.name}, group_id: ${entry.group_id}, group: ${(entry as any).group?.name}`);
                     return (
                       <SortableQueueItem
                         key={entry.id}
