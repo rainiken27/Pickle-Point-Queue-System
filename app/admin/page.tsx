@@ -58,16 +58,22 @@ function SortableQueueItem({ entry, countdown, onRemove }: any) {
       {...listeners}
       className={`rounded-lg shadow-sm border p-3 cursor-grab active:cursor-grabbing ${
         entry.group_id 
-          ? 'bg-purple-50 border-purple-200' 
-          : 'bg-blue-50 border-blue-200'
+          ? 'bg-yellow-50 border-yellow-200' 
+          : 'bg-green-50 border-green-200'
       }`}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3 flex-1">
           <GripVertical className="w-4 h-4 text-gray-400" />
-          <span className={`font-bold text-sm ${
-            entry.group_id ? 'text-purple-600' : 'text-blue-600'
-          }`}>#{entry.position}</span>
+          <div className="flex items-center gap-2">
+            {/* Colored circle indicator */}
+            <div className={`w-3 h-3 rounded-full ${
+              entry.group_id ? 'bg-yellow-500' : 'bg-green-500'
+            }`} />
+            <span className={`font-bold text-sm ${
+              entry.group_id ? 'text-yellow-600' : 'text-green-600'
+            }`}>#{entry.position}</span>
+          </div>
           
           {/* Player Photo */}
           <PlayerAvatar
@@ -78,25 +84,25 @@ function SortableQueueItem({ entry, countdown, onRemove }: any) {
             className="shrink-0"
           />
           
-          <div className="flex-1 min-w-0 max-w-[120px]">
-            <div className="flex items-center gap-2">
-              <p className="font-semibold text-sm truncate" title={entry.player.name}>{entry.player.name}</p>
-              {/* Visual indicator for group/solo */}
+          <div className="flex-1 min-w-0 max-w-[180px]">
+            <p className="font-semibold text-sm truncate" title={entry.player.name}>{entry.player.name}</p>
+            <p className="text-xs text-gray-500 truncate" title={entry.group_id ? `Group (${(entry as any).group?.name || 'Group'}) • ${getSkillLevelLabel(entry.player.skill_level)}` : `Solo • ${getSkillLevelLabel(entry.player.skill_level)}`}>
               {entry.group_id ? (
-                <div className="flex items-center gap-1 px-1.5 py-0.5 bg-purple-200 text-purple-700 rounded-full text-xs font-medium">
-                  <Users className="w-3 h-3" />
-                  Group
-                </div>
+                <span className="flex items-center gap-1">
+                  <span className="text-yellow-600 font-medium whitespace-nowrap">Group</span>
+                  <span className="text-gray-500"> (</span>
+                  <span className="text-yellow-600 truncate">{(entry as any).group?.name || 'Group'}</span>
+                  <span className="text-gray-500">)</span>
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full bg-yellow-500 flex-shrink-0`}></span>
+                  <span className="whitespace-nowrap">{getSkillLevelLabel(entry.player.skill_level)}</span>
+                </span>
               ) : (
-                <div className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-200 text-blue-700 rounded-full text-xs font-medium">
-                  <UserCheck className="w-3 h-3" />
-                  Solo
-                </div>
+                <span className="flex items-center gap-1">
+                  <span className="text-green-600 font-medium whitespace-nowrap">Solo</span>
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0`}></span>
+                  <span className="whitespace-nowrap">{getSkillLevelLabel(entry.player.skill_level)}</span>
+                </span>
               )}
-            </div>
-            <p className="text-xs text-gray-500">
-              {getSkillLevelLabel(entry.player.skill_level)}
-              {entry.group_id && ` • ${(entry as any).group?.name || 'Group'}`}
             </p>
             {countdown && (
               <p className={`text-xs font-mono mt-0.5 ${
@@ -161,6 +167,43 @@ export default function AdminDashboardRedesign() {
   const [nameSearchQuery, setNameSearchQuery] = useState('');
   const [nameSearchResults, setNameSearchResults] = useState<any[]>([]);
   const [nameSearchLoading, setNameSearchLoading] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(320); // Default width in pixels
+  const [isResizing, setIsResizing] = useState(false);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setIsResizing(true);
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isResizing) {
+        const newWidth = e.clientX;
+        // Set minimum and maximum width constraints
+        if (newWidth >= 280 && newWidth <= 600) {
+          setSidebarWidth(newWidth);
+        }
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    if (isResizing) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'default';
+      document.body.style.userSelect = 'auto';
+    };
+  }, [isResizing]);
   const [matchCompletionModal, setMatchCompletionModal] = useState<{
     isOpen: boolean;
     courtId: string;
@@ -1576,7 +1619,10 @@ export default function AdminDashboardRedesign() {
   return (
     <div className="min-h-screen bg-gray-100 flex">
       {/* LEFT SIDEBAR - QUEUE (STICKY) */}
-      <div className="w-80 bg-white shadow-lg flex flex-col h-screen sticky top-0">
+      <div 
+        className="bg-white shadow-lg flex flex-col h-screen sticky top-0"
+        style={{ width: `${sidebarWidth}px` }}
+      >
         <div className="p-4 border-b bg-gradient-to-r from-blue-600 to-blue-700">
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <Users className="w-6 h-6" />
@@ -1707,6 +1753,13 @@ export default function AdminDashboardRedesign() {
         </div>
       </div>
       
+      {/* RESIZE HANDLE */}
+      <div 
+        className="w-1 bg-gray-300 hover:bg-blue-500 cursor-col-resize transition-colors relative"
+        onMouseDown={handleMouseDown}
+      >
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-1 h-8 bg-gray-400 rounded-full opacity-0 hover:opacity-100 transition-opacity"></div>
+      </div>
 
       {/* MAIN CONTENT AREA */}
       <div className="flex-1 overflow-y-auto">
@@ -1802,20 +1855,8 @@ export default function AdminDashboardRedesign() {
             </div>
             <div className="p-4 bg-white">
               <div className="grid grid-cols-3 gap-4">
-                {/* Available courts first */}
-                {courts
-                  .filter(c => c.status === 'available')
-                  .map(court => renderCourt(court))}
-
-                {/* Reserved courts second */}
-                {courts
-                  .filter(c => c.status === 'reserved')
-                  .map(court => renderCourt(court))}
-
-                {/* Occupied courts last */}
-                {courts
-                  .filter(c => c.status === 'occupied')
-                  .map(court => renderCourt(court))}
+                {/* All courts in their natural order */}
+                {courts.map(court => renderCourt(court))}
               </div>
             </div>
           </div>

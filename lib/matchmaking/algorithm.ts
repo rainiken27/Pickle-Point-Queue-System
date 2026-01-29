@@ -441,14 +441,21 @@ export class MatchmakingEngine {
   }
 
   private async getUrgentPlayers(queue: QueueEntryWithPlayer[]): Promise<QueueEntryWithPlayer[]> {
-    // Get players with active sessions < 30 min remaining
+    // Get players with active sessions < 30 min remaining, excluding unlimited_time players
     const playerIds = queue.map(e => e.player_id);
 
     const { data: sessions } = await supabase
       .from('sessions')
-      .select('player_id, start_time')
+      .select(`
+        player_id, 
+        start_time,
+        players!inner (
+          unlimited_time
+        )
+      `)
       .in('player_id', playerIds)
-      .eq('status', 'active');
+      .eq('status', 'active')
+      .eq('players.unlimited_time', false); // Only check players without unlimited time
 
     const urgentPlayerIds = (sessions || [])
       .filter(session => {
