@@ -1601,10 +1601,46 @@ export default function AdminDashboardRedesign() {
     }
 
     const isReserved = court.status === 'reserved';
-    const borderColor = isAvailable ? 'border-green-500' : isReserved ? 'border-orange-500' : 'border-gray-300';
-    const bgColor = isAvailable ? 'bg-green-50' : isReserved ? 'bg-orange-50' : 'bg-gray-50';
-    const badgeColor = isAvailable ? 'bg-green-200 text-green-800' : isReserved ? 'bg-orange-200 text-orange-800' : 'bg-gray-200 text-gray-800';
-    const statusText = isAvailable ? 'Available' : isReserved ? 'Reserved' : 'Occupied';
+    const isOccupied = court.status === 'occupied';
+    
+    // Determine court colors based on status and game time
+    let borderColor, bgColor, badgeColor, statusText;
+    
+    if (isAvailable) {
+      borderColor = 'border-green-500';
+      bgColor = 'bg-green-50';
+      badgeColor = 'bg-green-200 text-green-800';
+      statusText = 'Available';
+    } else if (isReserved) {
+      borderColor = 'border-orange-500';
+      bgColor = 'bg-orange-50';
+      badgeColor = 'bg-orange-200 text-orange-800';
+      statusText = 'Reserved';
+    } else if (isOccupied && court.court_timer_started_at) {
+      // Check if game is overtime
+      const elapsed = Date.now() - new Date(court.court_timer_started_at).getTime();
+      const normalTime = 20 * 60 * 1000; // 20 minutes
+      
+      if (elapsed > normalTime) {
+        // Overtime - red
+        borderColor = 'border-red-500';
+        bgColor = 'bg-red-50';
+        badgeColor = 'bg-red-200 text-red-800';
+        statusText = 'Overtime';
+      } else {
+        // Ongoing within time - green
+        borderColor = 'border-green-500';
+        bgColor = 'bg-green-50';
+        badgeColor = 'bg-green-200 text-green-800';
+        statusText = 'In Progress';
+      }
+    } else {
+      // Fallback for occupied without timer
+      borderColor = 'border-gray-300';
+      bgColor = 'bg-gray-50';
+      badgeColor = 'bg-gray-200 text-gray-800';
+      statusText = 'Occupied';
+    }
 
     return (
       <Card key={court.id} className={`${borderColor} ${isSuggested ? 'ring-2 ring-yellow-400 shadow-lg' : ''}`}>
@@ -1614,6 +1650,11 @@ export default function AdminDashboardRedesign() {
               Court {court.court_number}
               {isSuggested && <Zap className="w-4 h-4 text-yellow-500" />}
               {isReserved && <Lock className="w-4 h-4 text-orange-600" />}
+              {isOccupied && court.court_timer_started_at && (() => {
+                const elapsed = Date.now() - new Date(court.court_timer_started_at).getTime();
+                const normalTime = 20 * 60 * 1000;
+                return elapsed > normalTime ? <Clock className="w-4 h-4 text-red-600" /> : null;
+              })()}
             </h3>
             <div className="flex items-center gap-2">
               {isAvailable && !suggestion && (

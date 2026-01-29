@@ -349,7 +349,13 @@ export default function TVDisplay() {
                       ? 'bg-amber-500'
                       : court.status === 'reserved'
                       ? 'bg-blue-600'
-                      : 'bg-red-600'
+                      : court.status === 'occupied' && court.court_timer_started_at
+                        ? (() => {
+                            const elapsed = Date.now() - new Date(court.court_timer_started_at).getTime();
+                            const normalTime = 20 * 60 * 1000; // 20 minutes
+                            return elapsed > normalTime ? 'bg-red-600' : 'bg-green-600';
+                          })()
+                        : 'bg-red-600'
                   }`}
                 >
                   <div className="text-3xl font-bold text-white text-center mb-2">
@@ -366,6 +372,14 @@ export default function TVDisplay() {
 
                   {court.status === 'occupied' && (
                     <>
+                      <div className="text-lg text-white/90 text-center">
+                        {court.court_timer_started_at && (() => {
+                          const elapsed = Date.now() - new Date(court.court_timer_started_at).getTime();
+                          const normalTime = 20 * 60 * 1000;
+                          return elapsed > normalTime ? 'Overtime' : 'In Progress';
+                        })()}
+                      </div>
+                      
                       {/* Court Timer */}
                       {courtTimerMs !== null && (
                         <div className={`text-center mb-2 ${
