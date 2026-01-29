@@ -618,13 +618,8 @@ export default function AdminDashboardRedesign() {
         if (data) {
           const sessionMap: Record<string, any> = {};
           data.forEach(session => {
-            console.log(`[Session Debug] Processing session for player ${session.player_id}:`, {
-              unlimited_time: session.players?.unlimited_time,
-              players_object: session.players
-            });
             sessionMap[session.player_id] = session;
           });
-          console.log('[Session Debug] Final session map:', sessionMap);
           setSessions(sessionMap);
         }
       } catch (error) {
@@ -638,28 +633,34 @@ export default function AdminDashboardRedesign() {
   const getSessionCountdown = (playerId: string) => {
     const session = sessions[playerId];
     if (!session) {
-      console.log(`[Session Debug] No session found for player ${playerId}`);
+      // Check if this player is in the queue and has unlimited_time
+      const queueEntry = queueEntries.find(e => e.player_id === playerId);
+      if (queueEntry && (queueEntry.player as any)?.unlimited_time) {
+        return '∞';
+      }
       return null;
     }
-
-    // Debug: Log the session structure
-    console.log(`[Session Debug] Player ${playerId} session:`, {
-      session_id: session.id,
-      start_time: session.start_time,
-      unlimited_time: session.players?.unlimited_time,
-      players_data: session.players
-    });
 
     // Check if player has unlimited time
     if (session.players?.unlimited_time) {
       return '∞';
     }
 
-    const elapsed = Date.now() - new Date(session.start_time).getTime();
-    const fiveHoursInMs = 5 * 60 * 60 * 1000;
-    const remaining = fiveHoursInMs - elapsed;
+    let remaining: number;
+    
+    // If session has an end_time (extended session), use that
+    if (session.end_time) {
+      remaining = new Date(session.end_time).getTime() - Date.now();
+    } else {
+      // Default calculation: 5 hours from start time
+      const elapsed = Date.now() - new Date(session.start_time).getTime();
+      const fiveHoursInMs = 5 * 60 * 60 * 1000;
+      remaining = fiveHoursInMs - elapsed;
+    }
 
-    if (remaining <= 0) return '00:00:00';
+    if (remaining <= 0) {
+      return '00:00:00';
+    }
 
     const hours = Math.floor(remaining / (1000 * 60 * 60));
     const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
@@ -1899,7 +1900,6 @@ export default function AdminDashboardRedesign() {
                 >
                   {filteredQueue.map((entry) => {
                     const countdown = getSessionCountdown(entry.player_id);
-                    console.log(`[Queue Debug] Player: ${entry.player.name}, group_id: ${entry.group_id}, group: ${(entry as any).group?.name}`);
                     return (
                       <SortableQueueItem
                         key={entry.id}

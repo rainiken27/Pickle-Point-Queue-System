@@ -8,7 +8,7 @@ import { QRScanner } from '@/components/QRScanner';
 import { ReceiptCapture } from '@/components/ReceiptCapture';
 import { useStore } from '@/store';
 import { Player, PlayerPreferences } from '@/types';
-import { Scan, Users, Clock, Keyboard, UserPlus, X, Check, Receipt } from 'lucide-react';
+import { Scan, Users, Clock, Keyboard, UserPlus, X, Check, Receipt, Plus } from 'lucide-react';
 import { getSkillLevelLabel } from '@/lib/utils/skillLevel';
 import { ImageWithFallback } from '@/components/ui/ImageWithFallback';
 
@@ -18,7 +18,18 @@ interface GroupMember extends Player {
 
 export default function CashierPage() {
   // Mode selection
-  const [isGroupMode, setIsGroupMode] = useState(false);
+  const [mode, setMode] = useState<'solo' | 'group' | 'extend'>('solo');
+
+  // Extend mode state
+  const [extendPlayer, setExtendPlayer] = useState<Player | null>(null);
+  const [extendQrCode, setExtendQrCode] = useState('');
+  const [extendFoundViaSearch, setExtendFoundViaSearch] = useState(false);
+  const [currentTimeRemaining, setCurrentTimeRemaining] = useState<string>('');
+  const [extendLoading, setExtendLoading] = useState(false);
+  const [extendSuccess, setExtendSuccess] = useState(false);
+  const [extendReceiptImage, setExtendReceiptImage] = useState<string | null>(null);
+  const [extendReceiptType, setExtendReceiptType] = useState<'physical' | 'gcash' | 'other'>('physical');
+  const [extendUploadingReceipt, setExtendUploadingReceipt] = useState(false);
 
   // Solo mode state
   const [qrCode, setQrCode] = useState('');
@@ -54,6 +65,131 @@ export default function CashierPage() {
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
 
   const addToQueue = useStore((state) => state.addToQueue);
+
+  // Extend mode: Validate player for session extension
+  const validateQRCodeExtend = async (qrCodeValue: string) => {
+    setExtendLoading(true);
+    try {
+      const response = await fetch('/api/players/validate-qr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ qr_uuid: qrCodeValue }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        alert(data.error || 'Invalid QR code');
+        return;
+      }
+
+      // Check if player has an active session
+      if (!data.player.active_session) {
+        alert(`${data.player.name} does not have an active session! Cannot extend time.`);
+        setExtendQrCode('');
+        return;
+      }
+
+      // Get current session details
+      const sessionResponse = await fetch('/api/sessions/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ player_id: data.player.id }),
+      });
+
+      const sessionData = await sessionResponse.json();
+      
+      if (sessionData.unlimited_time) {
+        alert(`${data.player.name} has unlimited time and cannot purchase additional hours.`);
+        setExtendQrCode('');
+        return;
+      }
+
+      setExtendPlayer(data.player);
+      setExtendQrCode(qrCodeValue);
+      setCurrentTimeRemaining(sessionData.time_remaining?.formatted || 'Unknown');
+
+    } catch (error) {
+      alert('Failed to validate QR code: ' + (error as Error).message);
+    } finally {
+      setExtendLoading(false);
+    }
+  };
+
+  // Extend mode: Handle session extension
+  const handleExtendSession = async () => {
+    if (!extendPlayer) return;
+
+    // Require receipt capture before extending session
+    if (!extendReceiptImage) {
+      alert('Please capture a receipt photo before extending the session.');
+      return;
+    }
+
+    setExtendLoading(true);
+    try {
+      // Extend session by 5 hours
+      const extendResponse = await fetch('/api/sessions/extend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          player_id: extendPlayer.id,
+          additional_hours: 5,
+        }),
+      });
+
+      if (!extendResponse.ok) {
+        const error = await extendResponse.json();
+        alert(error.error || 'Failed to extend session');
+        return;
+      }
+
+      const extendData = await extendResponse.json();
+
+      // Upload receipt with session extension info
+      if (extendReceiptImage) {
+        setExtendUploadingReceipt(true);
+        try {
+          const receiptBlob = await fetch(extendReceiptImage).then(r => r.blob());
+          const formData = new FormData();
+          formData.append('receipt', receiptBlob, `receipt-${Date.now()}.jpg`);
+          formData.append('sessionId', extendData.session.id);
+          formData.append('playerId', extendPlayer.id);
+          formData.append('receiptType', extendReceiptType);
+          formData.append('extension', 'true');
+
+          const receiptResponse = await fetch('/api/receipts/upload', {
+            method: 'POST',
+            body: formData,
+          });
+
+          if (!receiptResponse.ok) {
+            console.error('Failed to upload receipt:', await receiptResponse.json());
+          }
+        } catch (receiptError) {
+          console.error('Receipt upload error:', receiptError);
+        } finally {
+          setExtendUploadingReceipt(false);
+        }
+      }
+
+      setExtendSuccess(true);
+
+      // Reset after 3 seconds
+      setTimeout(() => {
+        setExtendQrCode('');
+        setExtendPlayer(null);
+        setExtendSuccess(false);
+        setCurrentTimeRemaining('');
+        setExtendReceiptImage(null);
+        setExtendReceiptType('physical');
+      }, 3000);
+    } catch (error) {
+      alert('Failed to extend session: ' + (error as Error).message);
+    } finally {
+      setExtendLoading(false);
+    }
+  };
 
   // Solo mode: Validate and set single player
   const validateQRCodeSolo = async (qrCodeValue: string) => {
@@ -160,8 +296,11 @@ export default function CashierPage() {
   };
 
   const handleCameraScan = (qrCodeValue: string) => {
-    if (isGroupMode) {
+    if (mode === 'group') {
       addPlayerToGroup(qrCodeValue);
+    } else if (mode === 'extend') {
+      setExtendFoundViaSearch(false);
+      validateQRCodeExtend(qrCodeValue);
     } else {
       setFoundViaSearch(false); // Normal QR scan, not name search
       validateQRCodeSolo(qrCodeValue);
@@ -169,11 +308,15 @@ export default function CashierPage() {
   };
 
   const handleManualScan = async () => {
-    const scanValue = isGroupMode ? currentScanQr : qrCode;
+    const scanValue = mode === 'group' ? currentScanQr : 
+                     mode === 'extend' ? extendQrCode : qrCode;
     if (!scanValue.trim()) return;
 
-    if (isGroupMode) {
+    if (mode === 'group') {
       addPlayerToGroup(scanValue);
+    } else if (mode === 'extend') {
+      setExtendFoundViaSearch(false);
+      validateQRCodeExtend(scanValue);
     } else {
       setFoundViaSearch(false); // Normal QR scan, not name search
       validateQRCodeSolo(scanValue);
@@ -209,9 +352,13 @@ export default function CashierPage() {
   };
 
   const selectPlayerFromSearch = async (selectedPlayer: Player) => {
-    if (isGroupMode) {
+    if (mode === 'group') {
       // Add to group
       await addPlayerToGroup(selectedPlayer.qr_uuid);
+    } else if (mode === 'extend') {
+      // Set as extend player - mark as found via search
+      setExtendFoundViaSearch(true);
+      await validateQRCodeExtend(selectedPlayer.qr_uuid);
     } else {
       // Set as solo player - mark as found via search
       setFoundViaSearch(true);
@@ -418,6 +565,26 @@ export default function CashierPage() {
     }
   };
 
+  if (extendSuccess) {
+    return (
+      <div className="min-h-screen bg-green-50 flex items-center justify-center">
+        <Card className="max-w-md">
+          <CardBody>
+            <div className="text-center space-y-4">
+              <div className="text-green-600 text-6xl">✓</div>
+              <h2 className="text-2xl font-bold text-green-600">Session Extended!</h2>
+              <p className="text-lg font-semibold">{extendPlayer?.name} now has 5 more hours!</p>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <p className="text-blue-900 font-semibold">Previous time: {currentTimeRemaining}</p>
+                <p className="text-sm text-blue-700 mt-1">+5 hours added successfully</p>
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+      </div>
+    );
+  }
+
   if (sessionStarted) {
     return (
       <div className="min-h-screen bg-green-50 flex items-center justify-center">
@@ -433,10 +600,10 @@ export default function CashierPage() {
                   <p className="text-sm text-blue-700 mt-1">Your session is still active</p>
                 </div>
               ) : (
-                <p className="text-gray-600">5-hour session{isGroupMode ? 's' : ''} started</p>
+                <p className="text-gray-600">5-hour session{mode === 'group' ? 's' : ''} started</p>
               )}
 
-              {isGroupMode && groupMembers.length > 0 && (
+              {isRejoining && (
                 <div className="mt-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
                   <p className="text-sm font-medium text-purple-900">Friend Group Priority Enabled! 🎾</p>
                   <p className="text-xs text-purple-700 mt-1">These players will be matched together</p>
@@ -462,27 +629,45 @@ export default function CashierPage() {
               </div>
               <div className="flex gap-2">
                 <Button
-                  variant={!isGroupMode ? 'primary' : 'secondary'}
+                  variant={mode === 'solo' ? 'primary' : 'secondary'}
                   onClick={() => {
-                    setIsGroupMode(false);
+                    setMode('solo');
                     setGroupMembers([]);
                     setGroupName('');
                     setCurrentScanQr('');
+                    setExtendPlayer(null);
+                    setExtendQrCode('');
                   }}
                 >
                   <Scan className="w-4 h-4 mr-2" />
                   Solo
                 </Button>
                 <Button
-                  variant={isGroupMode ? 'primary' : 'secondary'}
+                  variant={mode === 'group' ? 'primary' : 'secondary'}
                   onClick={() => {
-                    setIsGroupMode(true);
+                    setMode('group');
                     setPlayer(null);
                     setQrCode('');
+                    setExtendPlayer(null);
+                    setExtendQrCode('');
                   }}
                 >
                   <Users className="w-4 h-4 mr-2" />
                   Group (2-4 players)
+                </Button>
+                <Button
+                  variant={mode === 'extend' ? 'primary' : 'secondary'}
+                  onClick={() => {
+                    setMode('extend');
+                    setPlayer(null);
+                    setQrCode('');
+                    setGroupMembers([]);
+                    setGroupName('');
+                    setCurrentScanQr('');
+                  }}
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Extend Time
                 </Button>
               </div>
             </div>
@@ -493,14 +678,20 @@ export default function CashierPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center gap-3">
-              {isGroupMode ? <Users className="w-8 h-8 text-blue-600" /> : <Scan className="w-8 h-8 text-blue-600" />}
+              {mode === 'group' ? <Users className="w-8 h-8 text-blue-600" /> : 
+               mode === 'extend' ? <Plus className="w-8 h-8 text-blue-600" /> : 
+               <Scan className="w-8 h-8 text-blue-600" />}
               <div>
                 <h1 className="text-2xl font-bold">
-                  {isGroupMode ? 'Group Check-In' : 'Solo Check-In'}
+                  {mode === 'group' ? 'Group Check-In' : 
+                   mode === 'extend' ? 'Extend Session Time' : 
+                   'Solo Check-In'}
                 </h1>
                 <p className="text-sm text-gray-600 mt-1">
-                  {isGroupMode
+                  {mode === 'group'
                     ? `Scan ${groupMembers.length}/4 players • Friends will be matched together!`
+                    : mode === 'extend'
+                    ? 'Scan player QR code to extend session by 5 hours'
                     : 'Scan player QR code'}
                 </p>
               </div>
@@ -536,12 +727,24 @@ export default function CashierPage() {
                 <div className="flex gap-2">
                   <Input
                     placeholder="Paste QR UUID here (e.g., from seed script)"
-                    value={isGroupMode ? currentScanQr : qrCode}
-                    onChange={(e) => isGroupMode ? setCurrentScanQr(e.target.value) : setQrCode(e.target.value)}
+                    value={mode === 'group' ? currentScanQr : 
+                           mode === 'extend' ? extendQrCode : qrCode}
+                    onChange={(e) => {
+                      if (mode === 'group') {
+                        setCurrentScanQr(e.target.value);
+                      } else if (mode === 'extend') {
+                        setExtendQrCode(e.target.value);
+                      } else {
+                        setQrCode(e.target.value);
+                      }
+                    }}
                     onKeyPress={(e) => e.key === 'Enter' && handleManualScan()}
                   />
-                  <Button onClick={handleManualScan} disabled={loading}>
-                    {loading ? 'Validating...' : isGroupMode ? 'Add' : 'Scan'}
+                  <Button onClick={handleManualScan} disabled={loading || extendLoading}>
+                    {loading || extendLoading ? 'Validating...' : 
+                     mode === 'group' ? 'Add' : 
+                     mode === 'extend' ? 'Extend' : 
+                     'Scan'}
                   </Button>
                 </div>
               </div>
@@ -606,8 +809,154 @@ export default function CashierPage() {
           </CardBody>
         </Card>
 
+        {/* Extend Mode: Player Info & Extension */}
+        {mode === 'extend' && extendPlayer && (
+          <Card>
+            <CardHeader>
+              <h2 className="text-xl font-bold">Player Information</h2>
+            </CardHeader>
+            <CardBody className="space-y-6">
+              <div className="flex items-center gap-4">
+                <ImageWithFallback
+                  src={extendPlayer.photo_url}
+                  alt={extendPlayer.name}
+                  name={extendPlayer.name}
+                  className="w-20 h-20 rounded-full object-cover"
+                />
+                <div>
+                  <p className="text-2xl font-bold">{extendPlayer.name}</p>
+                  <p className="text-gray-600">
+                    {getSkillLevelLabel(extendPlayer.skill_level)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Current Time Remaining */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h3 className="font-semibold text-blue-900 mb-2">Current Session Time</h3>
+                <p className="text-2xl font-bold text-blue-600">{currentTimeRemaining}</p>
+                <p className="text-sm text-blue-700 mt-1">Time remaining in current session</p>
+              </div>
+
+              {/* QR Code Display - Only show if player was found via name search */}
+              {extendFoundViaSearch && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <h3 className="font-semibold text-green-900 mb-3 text-center">Your QR Code</h3>
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="bg-white p-4 rounded-lg shadow-sm">
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${extendQrCode}`}
+                        alt="QR Code"
+                        className="w-48 h-48"
+                      />
+                    </div>
+                    <p className="text-sm text-green-800 text-center">
+                      📸 Take a photo of this QR code for next time!
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Receipt Capture Section */}
+              <div className="border-2 border-orange-200 bg-orange-50 rounded-lg p-4">
+                <h3 className="font-semibold text-orange-900 mb-3 flex items-center gap-2">
+                  <Receipt className="w-5 h-5" />
+                  Payment Receipt (Required)
+                </h3>
+
+                {/* Receipt Type Selection */}
+                <div className="mb-4">
+                  <label className="text-sm font-medium text-gray-700 mb-2 block">Receipt Type</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setExtendReceiptType('physical')}
+                      className={`flex-1 py-2 px-4 rounded-lg border-2 transition-colors ${
+                        extendReceiptType === 'physical'
+                          ? 'border-orange-500 bg-orange-100 text-orange-800'
+                          : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                      }`}
+                    >
+                      Physical Receipt
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setExtendReceiptType('gcash')}
+                      className={`flex-1 py-2 px-4 rounded-lg border-2 transition-colors ${
+                        extendReceiptType === 'gcash'
+                          ? 'border-orange-500 bg-orange-100 text-orange-800'
+                          : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                      }`}
+                    >
+                      GCash Screenshot
+                    </button>
+                  </div>
+                </div>
+
+                {/* Receipt Capture or Preview */}
+                {extendReceiptImage ? (
+                  <div className="space-y-3">
+                    <div className="border-2 border-green-500 rounded-lg overflow-hidden">
+                      <img src={extendReceiptImage} alt="Captured receipt" className="w-full max-h-64 object-contain bg-white" />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-green-700 font-medium flex items-center gap-1">
+                        <Check className="w-4 h-4" />
+                        Receipt captured
+                      </span>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setExtendReceiptImage(null)}
+                      >
+                        Retake
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <ReceiptCapture
+                    onCapture={(imageDataUrl) => setExtendReceiptImage(imageDataUrl)}
+                    onError={(error) => console.error('Receipt capture error:', error)}
+                  />
+                )}
+              </div>
+
+              {/* Extension Summary */}
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <Plus className="w-5 h-5 text-green-600 mt-0.5" />
+                  <div>
+                    <p className="font-semibold text-green-900">Session Extension Summary</p>
+                    <p className="text-sm text-green-700 mt-1">
+                      Add 5 more hours to {extendPlayer.name}'s current session
+                    </p>
+                    <p className="text-xs text-green-600 mt-2">
+                      New total time: {currentTimeRemaining} + 5 hours
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <Button
+                onClick={handleExtendSession}
+                disabled={extendLoading || !extendReceiptImage}
+                className="w-full"
+                size="lg"
+              >
+                <Plus className="w-5 h-5 mr-2" />
+                {extendLoading
+                  ? (extendUploadingReceipt ? 'Uploading receipt...' : 'Extending...')
+                  : !extendReceiptImage
+                    ? 'Capture Receipt First'
+                    : 'Extend Session by 5 Hours'}
+              </Button>
+            </CardBody>
+          </Card>
+        )}
+
         {/* Group Members List (Group Mode Only) */}
-        {isGroupMode && groupMembers.length > 0 && (
+        {mode === 'group' && groupMembers.length > 0 && (
           <Card>
             <CardHeader>
               <h2 className="text-xl font-bold flex items-center gap-2">
@@ -673,7 +1022,7 @@ export default function CashierPage() {
         )}
 
         {/* Solo Mode: Player Info & Preferences */}
-        {!isGroupMode && player && (
+        {mode === 'solo' && player && (
           <Card>
             <CardHeader>
               <h2 className="text-xl font-bold">Player Information</h2>
@@ -836,7 +1185,7 @@ export default function CashierPage() {
         )}
 
         {/* Group Mode: Start Button */}
-        {isGroupMode && groupMembers.length >= 2 && (
+        {mode === 'group' && groupMembers.length >= 2 && (
           <Card>
             <CardHeader>
               <h2 className="text-xl font-bold">Ready to Start Group Session</h2>

@@ -20,7 +20,17 @@ export function calculateSessionTime(session: Session, unlimitedTime = false): A
     };
   }
 
-  const remainingMs = FIVE_HOURS_MS - elapsedMs;
+  let remainingMs: number;
+  
+  // If session has an end_time (extended session), use that
+  if (session.end_time) {
+    const endTime = new Date(session.end_time);
+    remainingMs = endTime.getTime() - now.getTime();
+  } else {
+    // Default calculation: 5 hours from start time
+    remainingMs = FIVE_HOURS_MS - elapsedMs;
+  }
+  
   const elapsedMinutes = Math.floor(elapsedMs / 60000);
   const remainingMinutes = Math.floor(remainingMs / 60000);
 
@@ -55,16 +65,40 @@ export function canStartNewGame(session: ActiveSession): boolean {
 export function isInGracePeriod(session: ActiveSession): boolean {
   // Never in grace period if unlimited time
   if (session.remaining_minutes === Infinity) return false;
+  
   // In grace period if time expired but within 25 min grace
-  const elapsedMs = session.elapsed_minutes * 60000;
-  return elapsedMs > FIVE_HOURS_MS && elapsedMs <= (FIVE_HOURS_MS + GRACE_PERIOD_MS);
+  let elapsedMs: number;
+  
+  if (session.end_time) {
+    // For extended sessions, calculate from end_time
+    const endTime = new Date(session.end_time);
+    const now = new Date();
+    elapsedMs = now.getTime() - endTime.getTime();
+  } else {
+    // For regular sessions, use the standard calculation
+    elapsedMs = session.elapsed_minutes * 60000;
+  }
+  
+  return elapsedMs > 0 && elapsedMs <= GRACE_PERIOD_MS;
 }
 
 export function hasExpired(session: ActiveSession): boolean {
   // Never expires if unlimited time
   if (session.remaining_minutes === Infinity) return false;
-  const elapsedMs = session.elapsed_minutes * 60000;
-  return elapsedMs > (FIVE_HOURS_MS + GRACE_PERIOD_MS);
+  
+  let elapsedMs: number;
+  
+  if (session.end_time) {
+    // For extended sessions, calculate from end_time
+    const endTime = new Date(session.end_time);
+    const now = new Date();
+    elapsedMs = now.getTime() - endTime.getTime();
+  } else {
+    // For regular sessions, use the standard calculation
+    elapsedMs = session.elapsed_minutes * 60000;
+  }
+  
+  return elapsedMs > GRACE_PERIOD_MS;
 }
 
 /**

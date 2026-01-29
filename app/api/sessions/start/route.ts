@@ -91,9 +91,18 @@ export async function POST(request: NextRequest) {
       // Calculate time remaining for regular players
       const startTime = new Date(existingSession.start_time).getTime();
       const now = Date.now();
-      const elapsed = now - startTime;
-      const fiveHoursInMs = 5 * 60 * 60 * 1000;
-      const remaining = fiveHoursInMs - elapsed;
+      let remaining: number;
+      
+      // If session has an end_time (extended session), use that
+      if (existingSession.end_time) {
+        const endTime = new Date(existingSession.end_time).getTime();
+        remaining = endTime - now;
+      } else {
+        // Default calculation: start_time + 5 hours - current_time
+        const fiveHoursInMs = 5 * 60 * 60 * 1000;
+        remaining = (startTime + fiveHoursInMs) - now;
+      }
+      
       const remainingHours = Math.floor(remaining / (60 * 60 * 1000));
       const remainingMinutes = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
 
