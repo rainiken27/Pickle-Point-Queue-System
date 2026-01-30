@@ -3,27 +3,34 @@ import { supabaseServer } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
   try {
+    console.log('[Move Group to Queue API] Starting request...');
+    
     // Check Supabase connection first
     if (!supabaseServer) {
       throw new Error('Supabase client not initialized');
     }
 
     const { group_id } = await request.json();
+    console.log('[Move Group to Queue API] Group ID:', group_id);
 
     if (!group_id) {
       return NextResponse.json({ error: 'Group ID is required' }, { status: 400 });
     }
 
     // Get all waitlist entries for this group
+    console.log('[Move Group to Queue API] Fetching waitlist entries for group:', group_id);
     const { data: waitlistEntries, error: fetchError } = await supabaseServer
       .from('queue')
       .select('*')
       .eq('group_id', group_id)
       .eq('status', 'waitlist');
 
+    console.log('[Move Group to Queue API] Waitlist entries found:', waitlistEntries?.length || 0);
+    console.log('[Move Group to Queue API] Fetch error:', fetchError);
+
     if (fetchError) {
       console.error('Error fetching waitlist entries:', fetchError);
-      return NextResponse.json({ error: 'Failed to fetch waitlist entries' }, { status: 500 });
+      return NextResponse.json({ error: `Failed to fetch waitlist entries: ${fetchError.message}` }, { status: 500 });
     }
 
     if (!waitlistEntries || waitlistEntries.length === 0) {
@@ -31,6 +38,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Update all group entries from waitlist to waiting status
+    console.log('[Move Group to Queue API] Updating entries to waiting status...');
     const { data: updatedEntries, error: updateError } = await supabaseServer
       .from('queue')
       .update({ status: 'waiting' })
@@ -38,20 +46,25 @@ export async function POST(request: NextRequest) {
       .eq('status', 'waitlist')
       .select();
 
+    console.log('[Move Group to Queue API] Updated entries:', updatedEntries?.length || 0);
+    console.log('[Move Group to Queue API] Update error:', updateError);
+
     if (updateError) {
       console.error('Error updating queue entries:', updateError);
-      return NextResponse.json({ error: 'Failed to update queue entries' }, { status: 500 });
+      return NextResponse.json({ error: `Failed to update queue entries: ${updateError.message}` }, { status: 500 });
     }
 
     // Recalculate positions - moved group should go to BOTTOM of waiting queue
     const movedEntryIds = updatedEntries?.map((entry: any) => entry.id) || [];
+    console.log('[Move Group to Queue API] Recalculating positions for moved entries:', movedEntryIds);
     const positionError = await recalculatePositions(supabaseServer, movedEntryIds);
 
     if (positionError) {
-      console.error('Error recalculating positions:', positionError);
-      return NextResponse.json({ error: 'Failed to recalculate positions' }, { status: 500 });
+      console.error('[Move Group to Queue API] Error recalculating positions:', positionError);
+      return NextResponse.json({ error: `Failed to recalculate positions: ${positionError.message}` }, { status: 500 });
     }
 
+    console.log('[Move Group to Queue API] Success! Group moved to queue.');
     return NextResponse.json({
       success: true,
       message: `Moved group ${group_id} with ${updatedEntries?.length || 0} members back to queue`,
@@ -59,8 +72,16 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error('Error in move-group-to-queue:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error('[Move Group to Queue API] Full error details:', {
+      error,
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+      name: error instanceof Error ? error.name : undefined
+    });
+    return NextResponse.json({ 
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
   }
 }
 

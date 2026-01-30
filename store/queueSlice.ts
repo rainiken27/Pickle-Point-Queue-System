@@ -288,6 +288,7 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
 
   moveGroupToQueue: async (groupId: string) => {
     try {
+      console.log('[Queue Store] Moving group to queue:', groupId);
       const response = await fetch('/api/queue/move-group-to-queue', {
         method: 'POST',
         headers: {
@@ -296,13 +297,20 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
         body: JSON.stringify({ group_id: groupId }),
       });
 
+      console.log('[Queue Store] Response status:', response.status);
+      console.log('[Queue Store] Response ok:', response.ok);
+
       if (!response.ok) {
         const error = await response.json();
+        console.error('[Queue Store] API Error Response:', error);
         throw new Error(error.error || 'Failed to move group to queue');
       }
 
+      const result = await response.json();
+      console.log('[Queue Store] Success response:', result);
       await get().fetchQueue();
     } catch (error) {
+      console.error('[Queue Store] Error in moveGroupToQueue:', error);
       set({ error: (error as Error).message });
       throw error;
     }
