@@ -120,7 +120,7 @@ async function recalculatePositions(supabase: any, movedEntryIds: string[] = [])
       .select('*')
       .eq('status', 'waiting')
       .in('id', movedEntryIds)
-      .order('created_at', { ascending: true });
+      .order('joined_at', { ascending: true });
 
     if (movedError) {
       console.error('Error fetching newly moved entries:', movedError);
