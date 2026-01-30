@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# dev artifacts
+UNLIMITED_TIME_FIX.md
+WAITLIST_IMPLEMENTATION_PLAN.md
+fix-unlimited-time.sql

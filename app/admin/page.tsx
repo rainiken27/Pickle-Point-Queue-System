@@ -451,7 +451,6 @@ export default function AdminDashboardRedesign() {
         setTimeWarningModal({
           isOpen: true,
           players: lowTimePlayers,
-          warnedPlayerIds: currentLowTimePlayerIds,
         });
       }
     } catch (error) {
