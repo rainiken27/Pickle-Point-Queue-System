@@ -753,6 +753,10 @@ export default function AdminDashboardRedesign() {
       await checkGroupMembershipIntegrity();
     })();
 
+    // Set up real-time subscriptions
+    const unsubQueue = subscribeToQueue();
+    const unsubCourts = subscribeToCourts();
+
     // Update every second for countdowns
     const updateInterval = setInterval(() => {
       const newTime = new Date();
@@ -815,6 +819,8 @@ export default function AdminDashboardRedesign() {
     return () => {
       clearInterval(updateInterval);
       clearInterval(expirationInterval);
+      unsubQueue();
+      unsubCourts();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Remove courts dependency to prevent infinite loop
