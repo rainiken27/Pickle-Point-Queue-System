@@ -2737,7 +2737,7 @@ export default function AdminDashboardRedesign() {
                     };
                     localStorage.setItem('timeWarningData', JSON.stringify(warningData));
                   }
-                  setTimeWarningModal({ isOpen: false, players: [], warnedPlayerIds: [] });
+                  setTimeWarningModal({ isOpen: false, players: [] });
                 }}
                 className="text-gray-400 hover:text-gray-600 transition-colors"
               >
@@ -2778,7 +2778,7 @@ export default function AdminDashboardRedesign() {
                     };
                     localStorage.setItem('timeWarningData', JSON.stringify(warningData));
                   }
-                  setTimeWarningModal({ isOpen: false, players: [], warnedPlayerIds: [] });
+                  setTimeWarningModal({ isOpen: false, players: [] });
                 }}
                 className="w-full"
               >
