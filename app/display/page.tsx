@@ -367,7 +367,7 @@ export default function TVDisplay() {
                   )}
 
                   {court.status === 'reserved' && (
-                    <div className="text-lg text-white/90 text-center">Reserved</div>
+                    <div className="text-lg text-white/90 text-center">{(court as any).reserved_note || 'Reserved'}</div>
                   )}
 
                   {court.status === 'occupied' && (
