@@ -14,6 +14,11 @@ export interface QueueSlice {
   updateQueuePosition: (queueId: string, newPosition: number) => Promise<void>;
   updateQueuePositions: (updates: Array<{ id: string; position: number }>) => Promise<void>;
   subscribeToQueue: () => () => void;
+  
+  // Waitlist actions
+  moveToWaitlist: (queueEntryIds: string[]) => Promise<void>;
+  moveToQueue: (queueEntryIds: string[]) => Promise<void>;
+  moveGroupToQueue: (groupId: string) => Promise<void>;
 }
 
 export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
@@ -32,7 +37,7 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
           player:players(*),
           group:groups(id, name)
         `)
-        .in('status', ['waiting', 'playing']) // Fetch both waiting and playing players
+        .in('status', ['waiting', 'playing', 'waitlist']) // Fetch waiting, playing, and waitlist players
         .order('position', { ascending: true }); // Order by position to support manual reordering
 
       if (queueError) throw queueError;
@@ -206,5 +211,100 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
       clearInterval(pollInterval);
       subscription.unsubscribe();
     };
+  },
+
+  // Waitlist actions
+  moveToWaitlist: async (queueEntryIds: string[]) => {
+    try {
+      console.log('[Queue Store] Moving to waitlist:', queueEntryIds);
+      const response = await fetch('/api/queue/move-to-waitlist', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ queue_entry_ids: queueEntryIds }),
+      });
+
+      console.log('[Queue Store] Response status:', response.status);
+      console.log('[Queue Store] Response ok:', response.ok);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[Queue Store] Error response:', errorText);
+        let error;
+        try {
+          error = JSON.parse(errorText);
+        } catch {
+          error = { error: errorText };
+        }
+        throw new Error(error.error || 'Failed to move to waitlist');
+      }
+
+      const result = await response.json();
+      console.log('[Queue Store] Success response:', result);
+      await get().fetchQueue();
+    } catch (error) {
+      console.error('[Queue Store] Error in moveToWaitlist:', error);
+      set({ error: (error as Error).message });
+      throw error;
+    }
+  },
+
+  moveToQueue: async (queueEntryIds: string[]) => {
+    try {
+      console.log('[Queue Store] Moving to queue:', queueEntryIds);
+      const response = await fetch('/api/queue/move-to-queue', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ queue_entry_ids: queueEntryIds }),
+      });
+
+      console.log('[Queue Store] Response status:', response.status);
+      console.log('[Queue Store] Response ok:', response.ok);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[Queue Store] Error response:', errorText);
+        let error;
+        try {
+          error = JSON.parse(errorText);
+        } catch {
+          error = { error: errorText };
+        }
+        throw new Error(error.error || 'Failed to move to queue');
+      }
+
+      const result = await response.json();
+      console.log('[Queue Store] Success response:', result);
+      await get().fetchQueue();
+    } catch (error) {
+      console.error('[Queue Store] Error in moveToQueue:', error);
+      set({ error: (error as Error).message });
+      throw error;
+    }
+  },
+
+  moveGroupToQueue: async (groupId: string) => {
+    try {
+      const response = await fetch('/api/queue/move-group-to-queue', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ group_id: groupId }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to move group to queue');
+      }
+
+      await get().fetchQueue();
+    } catch (error) {
+      set({ error: (error as Error).message });
+      throw error;
+    }
   },
 });

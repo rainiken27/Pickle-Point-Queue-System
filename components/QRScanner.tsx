@@ -28,7 +28,7 @@ export function QRScanner({ onScan, onError }: QRScannerProps) {
       const scanner = scannerRef.current;
 
       await scanner.start(
-        { facingMode: "environment" }, // Use back camera
+        { facingMode: "environment" }, // Use back camera (pointing away)
         {
           fps: 20, // Increased from 10 to scan more frequently
           qrbox: function(viewfinderWidth, viewfinderHeight) {
@@ -114,16 +114,27 @@ export function QRScanner({ onScan, onError }: QRScannerProps) {
   }, []);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
+      {/* Camera view - appears above button */}
+      <div
+        id={qrCodeRegionId}
+        className={`${
+          isScanning
+            ? 'border-2 border-blue-500 rounded-lg overflow-hidden'
+            : 'hidden'
+        }`}
+      />
+
+      {/* Button - appears below camera view */}
       <div className="flex gap-2">
         {!isScanning ? (
-          <Button onClick={startScanning} type="button" className="w-full">
-            <Camera className="w-4 h-4 mr-2" />
+          <Button onClick={startScanning} type="button" className="w-full py-1 text-sm">
+            <Camera className="w-3 h-3 mr-1" />
             Start Camera Scanner
           </Button>
         ) : (
-          <Button onClick={stopScanning} type="button" variant="secondary" className="w-full">
-            <CameraOff className="w-4 h-4 mr-2" />
+          <Button onClick={stopScanning} type="button" variant="secondary" className="w-full py-1 text-sm">
+            <CameraOff className="w-3 h-3 mr-1" />
             Stop Scanner
           </Button>
         )}
@@ -138,15 +149,6 @@ export function QRScanner({ onScan, onError }: QRScannerProps) {
           </p>
         </div>
       )}
-
-      <div
-        id={qrCodeRegionId}
-        className={`${
-          isScanning
-            ? 'border-2 border-blue-500 rounded-lg overflow-hidden'
-            : 'hidden'
-        }`}
-      />
     </div>
   );
 }

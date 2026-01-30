@@ -41,6 +41,9 @@ export const useQueue = () => useStore(useShallow((state) => ({
   removeFromQueue: state.removeFromQueue,
   subscribeToQueue: state.subscribeToQueue,
   updateQueuePositions: state.updateQueuePositions,
+  moveToWaitlist: state.moveToWaitlist,
+  moveToQueue: state.moveToQueue,
+  moveGroupToQueue: state.moveGroupToQueue,
 })));
 
 export const useCourts = () => useStore(useShallow((state) => ({

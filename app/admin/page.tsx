@@ -8,7 +8,7 @@ import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { CourtStatus, MatchSuggestion } from '@/types';
 import {
   PlayCircle, CheckCircle, Users, Clock, TrendingUp, BarChart3,
-  UserX, AlertTriangle, ChevronDown, ChevronRight, Zap, Activity, Search, Lock, Unlock, GripVertical, UserPlus, UserCheck
+  UserX, AlertTriangle, ChevronDown, ChevronRight, Zap, Activity, Search, Lock, Unlock, GripVertical, UserPlus, UserCheck, MoreVertical
 } from 'lucide-react';
 import { getSkillLevelLabel } from '@/lib/utils/skillLevel';
 import { QRScanner } from '@/components/QRScanner';
@@ -107,30 +107,31 @@ const getGroupColor = (group: { id: string; name: string } | null) => {
   };
 };
 
-// Sortable Queue Item Component
-function SortableQueueItem({ entry, countdown, onRemove }: any) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: entry.id });
+// Queue Item Component (no longer sortable)
+function QueueItem({ entry, countdown, onRemove, onMoveToWaitlist }: any) {
+  const [showOptions, setShowOptions] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowOptions(false);
+      }
+    };
+
+    if (showOptions) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showOptions]);
 
   return (
     <div
-      ref={setNodeRef}
-      style={style}
-      {...attributes}
-      {...listeners}
-      className={`rounded-lg shadow-sm border p-3 cursor-grab active:cursor-grabbing ${
+      className={`rounded-lg shadow-sm border p-2 ${
         entry.group_id 
           ? `${getGroupColor((entry as any).group).bg} ${getGroupColor((entry as any).group).border}` 
           : 'bg-green-50 border-green-200'
@@ -138,15 +139,10 @@ function SortableQueueItem({ entry, countdown, onRemove }: any) {
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3 flex-1">
-          <GripVertical className="w-4 h-4 text-gray-400" />
           <div className="flex items-center gap-2">
-            {/* Colored circle indicator */}
-            <div className={`w-3 h-3 rounded-full ${
-              entry.group_id ? getGroupColor((entry as any).group).dot : 'bg-green-500'
-            }`} />
             <span className={`font-bold text-sm ${
               entry.group_id ? getGroupColor((entry as any).group).text : 'text-green-600'
-            }`}>#{entry.position}</span>
+            }`}>({entry.position})</span>
           </div>
           
           {/* Player Photo */}
@@ -160,13 +156,10 @@ function SortableQueueItem({ entry, countdown, onRemove }: any) {
           
           <div className="flex-1 min-w-0 max-w-[180px]">
             <p className="font-semibold text-sm truncate" title={entry.player.name}>{entry.player.name}</p>
-            <p className="text-xs text-gray-500 truncate" title={entry.group_id ? `Group (${(entry as any).group?.name || 'Group'}) • ${getSkillLevelLabel(entry.player.skill_level)}` : `Solo • ${getSkillLevelLabel(entry.player.skill_level)}`}>
+            <p className="text-xs text-gray-500 truncate" title={entry.group_id ? `${(entry as any).group?.name || 'Group'} • ${getSkillLevelLabel(entry.player.skill_level)}` : `Solo • ${getSkillLevelLabel(entry.player.skill_level)}`}>
               {entry.group_id ? (
                 <span className="flex items-center gap-1">
-                  <span className={`${getGroupColor((entry as any).group).text} font-medium whitespace-nowrap`}>Group</span>
-                  <span className="text-gray-500"> (</span>
-                  <span className={`${getGroupColor((entry as any).group).text} truncate`}>{(entry as any).group?.name || 'Group'}</span>
-                  <span className="text-gray-500">)</span>
+                  <span className={`${getGroupColor((entry as any).group).text} font-medium whitespace-nowrap truncate`}>{(entry as any).group?.name || 'Group'}</span>
                   <span className={`inline-block w-1.5 h-1.5 rounded-full ${getGroupColor((entry as any).group).dot} flex-shrink-0`}></span>
                   <span className="whitespace-nowrap">{getSkillLevelLabel(entry.player.skill_level)}</span>
                 </span>
@@ -178,29 +171,60 @@ function SortableQueueItem({ entry, countdown, onRemove }: any) {
                 </span>
               )}
             </p>
-            {countdown && (
-              <p className={`text-xs font-mono mt-0.5 ${
-                countdown === '∞'
-                  ? 'text-green-600 font-bold'
-                  : 'text-orange-600'
-              }`}>
-                <Clock className="w-3 h-3 inline mr-1" />
-                {countdown === '∞' ? 'Unlimited Time' : countdown}
-              </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {countdown && (
+            <div className={`text-xs font-mono ${
+              countdown === '∞'
+                ? 'text-green-600 font-bold'
+                : 'text-orange-600'
+            }`}>
+              <Clock className="w-3 h-3 inline mr-1" />
+              {countdown === '∞' ? '∞' : countdown}
+            </div>
+          )}
+          <div className="relative" ref={dropdownRef}>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowOptions(!showOptions);
+              }}
+              className="pointer-events-auto"
+            >
+              <MoreVertical className="w-3 h-3" />
+            </Button>
+            
+            {showOptions && (
+              <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 min-w-32">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowOptions(false);
+                    onMoveToWaitlist(entry.id, entry.group_id);
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 flex items-center gap-2"
+                >
+                  <Clock className="w-3 h-3" />
+                  Move to Waitlist
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowOptions(false);
+                    onRemove(entry.id, entry.player.name);
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 flex items-center gap-2 text-red-600"
+                >
+                  <UserX className="w-3 h-3" />
+                  Remove from Queue
+                </button>
+              </div>
             )}
           </div>
         </div>
-        <Button
-          variant="danger"
-          size="sm"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove(entry.id, entry.player.name);
-          }}
-          className="pointer-events-auto"
-        >
-          <UserX className="w-3 h-3" />
-        </Button>
       </div>
     </div>
   );
@@ -209,7 +233,7 @@ function SortableQueueItem({ entry, countdown, onRemove }: any) {
 export default function AdminDashboardRedesign() {
   const router = useRouter();
   const { courts, fetchCourts, assignSession, completeSession, subscribeToCourts } = useCourts();
-  const { queueEntries, fetchQueue, subscribeToQueue, updateQueuePositions } = useQueue();
+  const { queueEntries, fetchQueue, subscribeToQueue, updateQueuePositions, moveGroupToQueue, moveToWaitlist, moveToQueue } = useQueue();
   const [matchSuggestions, setMatchSuggestions] = useState<Record<string, MatchSuggestion | null>>({});
   const [verifiedPlayers, setVerifiedPlayers] = useState<Record<string, Set<string>>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({});
@@ -241,7 +265,7 @@ export default function AdminDashboardRedesign() {
   const [nameSearchQuery, setNameSearchQuery] = useState('');
   const [nameSearchResults, setNameSearchResults] = useState<any[]>([]);
   const [nameSearchLoading, setNameSearchLoading] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(320); // Default width in pixels
+  const [sidebarWidth, setSidebarWidth] = useState(400); // Default width in pixels
   const [isResizing, setIsResizing] = useState(false);
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -320,9 +344,18 @@ export default function AdminDashboardRedesign() {
       timeRemaining: string;
       courtNumber: number;
     }>;
-  }>({
-    isOpen: false,
-    players: [],
+  }>(() => {
+    // Check if warning was recently dismissed (within last 15 minutes)
+    if (typeof window !== 'undefined') {
+      const lastDismissed = localStorage.getItem('timeWarningDismissed');
+      if (lastDismissed) {
+        const timeSinceDismissed = Date.now() - parseInt(lastDismissed);
+        if (timeSinceDismissed < 15 * 60 * 1000) { // 15 minutes
+          return { isOpen: false, players: [] };
+        }
+      }
+    }
+    return { isOpen: false, players: [] };
   });
   
   // Ref to store current courts for timer checking (avoids stale closure)
@@ -391,11 +424,34 @@ export default function AdminDashboardRedesign() {
         }
       }
 
-      // Update modal state if there are players with low time
-      if (lowTimePlayers.length > 0) {
+      // Update modal state if there are players with low time and modal isn't already open
+      // Check if these are new players that haven't been warned recently
+      let recentlyDismissed = false;
+      let warnedPlayerIds: string[] = [];
+      
+      if (typeof window !== 'undefined') {
+        const warningData = localStorage.getItem('timeWarningData');
+        if (warningData) {
+          const { timestamp, warnedPlayerIds: storedIds } = JSON.parse(warningData);
+          const timeSinceDismissed = Date.now() - timestamp;
+          if (timeSinceDismissed < 15 * 60 * 1000) { // 15 minutes
+            recentlyDismissed = true;
+            warnedPlayerIds = storedIds;
+          }
+        }
+      }
+      
+      // Get current low time player IDs
+      const currentLowTimePlayerIds = lowTimePlayers.map(p => p.name);
+      
+      // Show modal if there are new players who haven't been warned
+      const hasNewPlayers = currentLowTimePlayerIds.some(id => !warnedPlayerIds.includes(id));
+      
+      if (lowTimePlayers.length > 0 && !timeWarningModal.isOpen && (!recentlyDismissed || hasNewPlayers)) {
         setTimeWarningModal({
           isOpen: true,
           players: lowTimePlayers,
+          warnedPlayerIds: currentLowTimePlayerIds,
         });
       }
     } catch (error) {
@@ -405,6 +461,7 @@ export default function AdminDashboardRedesign() {
 
   // Derived state - must be defined early for use in handlers
   const waitingQueue = queueEntries.filter(e => e.status === 'waiting');
+  const waitlistQueue = queueEntries.filter(e => e.status === 'waitlist');
 
   // Update courts ref whenever courts change
   useEffect(() => {
@@ -468,6 +525,57 @@ export default function AdminDashboardRedesign() {
         console.error('[Drag] Failed to update queue positions:', error);
         alert('Failed to reorder queue: ' + (error as Error).message);
       }
+    }
+  };
+
+  const handleMoveIndividualToQueue = async (queueId: string) => {
+    if (!confirm('Move this player back to the queue?')) {
+      return;
+    }
+
+    try {
+      await moveToQueue([queueId]);
+      alert('Player moved back to queue successfully!');
+    } catch (error) {
+      console.error('Error moving player to queue:', error);
+      alert('Failed to move player to queue');
+    }
+  };
+
+  const handleMoveToQueue = async (groupId: string | null) => {
+    if (!groupId) {
+      alert('No group ID found');
+      return;
+    }
+
+    if (!confirm('Move this group back to the queue?')) {
+      return;
+    }
+
+    try {
+      await moveGroupToQueue(groupId);
+      alert('Group moved back to queue successfully!');
+    } catch (error) {
+      console.error('Error moving group to queue:', error);
+      alert('Failed to move group to queue');
+    }
+  };
+
+  const handleMoveToWaitlist = async (queueId: string, groupId: string | null) => {
+    const message = groupId 
+      ? 'Move this group to the waitlist? They will wait for all group members to be present.'
+      : 'Move this player to the waitlist?';
+    
+    if (!confirm(message)) {
+      return;
+    }
+
+    try {
+      await moveToWaitlist([queueId]);
+      alert('Moved to waitlist successfully!');
+    } catch (error) {
+      console.error('Error moving to waitlist:', error);
+      alert('Failed to move to waitlist');
     }
   };
 
@@ -1998,132 +2106,214 @@ export default function AdminDashboardRedesign() {
         className="bg-white shadow-lg flex flex-col h-screen sticky top-0"
         style={{ width: `${sidebarWidth}px` }}
       >
-        <div className="p-4 border-b bg-gradient-to-r from-blue-600 to-blue-700">
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <Users className="w-6 h-6" />
-            Queue Management
-          </h2>
-          <div className="text-sm text-blue-100 mt-1">
-            {waitingQueue.length} players waiting
+        {/* UPPER SECTION - MAIN QUEUE */}
+        <div className="flex flex-col border-b" style={{ height: '60vh' }}>
+          <div className="p-2 border-b bg-gradient-to-r from-blue-600 to-blue-700">
+            <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <Users className="w-4 h-4" />
+              Main Queue ({waitingQueue.length}) | <Clock className="w-4 h-4" /> Waitlist ({waitlistQueue.length})
+            </h2>
           </div>
-        </div>
 
-        {/* Search/Filter */}
-        <div className="p-3 border-b bg-gray-50">
-          <div className="relative">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search by name..."
-              value={queueSearchTerm}
-              onChange={(e) => setQueueSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+          {/* Search/Filter */}
+          <div className="p-2 border-b bg-gray-50">
+            <div className="relative">
+              <Search className="w-3 h-3 absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search by name..."
+                value={queueSearchTerm}
+                onChange={(e) => setQueueSearchTerm(e.target.value)}
+                className="w-full pl-7 pr-3 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
           </div>
-        </div>
 
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={handleDragEnd}
-        >
-          <div className="flex-1 overflow-y-auto p-4 space-y-2">
-            {(() => {
-              // Filter and sort queue first to ensure SortableContext and rendered items match
-              const filteredQueue = waitingQueue
-                .filter(e => queueSearchTerm === '' || e.player.name.toLowerCase().includes(queueSearchTerm.toLowerCase()))
-                .sort((a, b) => a.position - b.position);
+          <div className="overflow-y-auto p-4 space-y-2" style={{ height: 'calc(60vh - 100px)' }}>
+          {(() => {
+            // Filter and sort queue 
+            const filteredQueue = waitingQueue
+              .filter(e => queueSearchTerm === '' || e.player.name.toLowerCase().includes(queueSearchTerm.toLowerCase()))
+              .sort((a, b) => a.position - b.position);
 
+            return filteredQueue.map((entry) => {
+              const countdown = getSessionCountdown(entry.player_id);
               return (
-                <SortableContext
-                  items={filteredQueue.map(e => e.id)}
-                  strategy={verticalListSortingStrategy}
-                >
-                  {filteredQueue.map((entry) => {
-                    const countdown = getSessionCountdown(entry.player_id);
-                    return (
-                      <SortableQueueItem
-                        key={entry.id}
-                        entry={entry}
-                        countdown={countdown}
-                        onRemove={handleRemoveFromQueue}
-                      />
-                    );
-                  })}
-                </SortableContext>
+                <QueueItem
+                  key={entry.id}
+                  entry={entry}
+                  countdown={countdown}
+                  onRemove={handleRemoveFromQueue}
+                  onMoveToWaitlist={handleMoveToWaitlist}
+                />
               );
-            })()}
-            {waitingQueue.length === 0 && (
+            });
+          })()}
+          {waitingQueue.length === 0 && (
+            <div className="text-center py-8 text-gray-400">
+              No players in main queue
+            </div>
+          )}
+        </div>
+        </div>
+
+        {/* LOWER SECTION - WAITLIST */}
+        <div className="flex flex-col" style={{ height: '40vh' }}>
+          <div className="border-t-2 border-gray-300"></div>
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-2">
+            {waitlistQueue.length > 0 ? (
+              waitlistQueue
+                .filter(e => queueSearchTerm === '' || e.player.name.toLowerCase().includes(queueSearchTerm.toLowerCase()))
+                .sort((a, b) => a.position - b.position)
+                .map((entry) => {
+                  const countdown = getSessionCountdown(entry.player_id);
+                  return (
+                    <div
+                      key={entry.id}
+                      className={`rounded-lg shadow-sm border p-2 cursor-pointer hover:shadow-md transition-all ${
+                        entry.group_id 
+                          ? `${getGroupColor((entry as any).group).bg} ${getGroupColor((entry as any).group).border}` 
+                          : 'bg-green-50 border-green-200'
+                      }`}
+                      onClick={() => {
+                        // Handle waitlist actions - could open a modal for group management
+                      }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3 flex-1">
+                          <span className={`font-bold text-sm ${
+                            entry.group_id ? getGroupColor((entry as any).group).text : 'text-green-600'
+                          }`}>({entry.position})</span>
+                          <div className="flex items-center gap-2">
+                            <PlayerAvatar
+                              name={entry.player.name}
+                              photo_url={entry.player.photo_url}
+                              display_photo={(entry as any).session?.display_photo}
+                              size="sm"
+                              className="shrink-0"
+                            />
+                            <div className="flex-1">
+                              <p className="font-semibold text-sm">{entry.player.name}</p>
+                              <p className="text-xs text-gray-500 truncate" title={entry.group_id ? `${(entry as any).group?.name || 'Group'} • ${getSkillLevelLabel(entry.player.skill_level)}` : `Solo • ${getSkillLevelLabel(entry.player.skill_level)}`}>
+                                {entry.group_id ? (
+                                  <span className="flex items-center gap-1">
+                                    <span className={`${getGroupColor((entry as any).group).text} font-medium whitespace-nowrap truncate`}>{(entry as any).group?.name || 'Group'}</span>
+                                    <span className={`inline-block w-1.5 h-1.5 rounded-full ${getGroupColor((entry as any).group).dot} flex-shrink-0`}></span>
+                                    <span className="whitespace-nowrap">{getSkillLevelLabel(entry.player.skill_level)}</span>
+                                  </span>
+                                ) : (
+                                  <span className="flex items-center gap-1">
+                                    <span className="text-green-600 font-medium whitespace-nowrap">Solo</span>
+                                    <span className={`inline-block w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0`}></span>
+                                    <span className="whitespace-nowrap">{getSkillLevelLabel(entry.player.skill_level)}</span>
+                                  </span>
+                                )}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {countdown && (
+                            <div className={`text-xs font-mono ${
+                              countdown === '∞'
+                                ? 'text-green-600 font-bold'
+                                : 'text-orange-600'
+                            }`}>
+                              <Clock className="w-3 h-3 inline mr-1" />
+                              {countdown === '∞' ? '∞' : countdown}
+                            </div>
+                          )}
+                          {entry.group_id ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMoveToQueue(entry.group_id);
+                              }}
+                              className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition"
+                              title="Move entire group to queue"
+                            >
+                              Move Group to Queue
+                            </button>
+                          ) : (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMoveIndividualToQueue(entry.id);
+                              }}
+                              className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition"
+                              title="Move player to queue"
+                            >
+                              Move to Queue
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+            ) : (
               <div className="text-center py-8 text-gray-400">
-                No players in queue
+                No players in waitlist
               </div>
             )}
           </div>
-        </DndContext>
-                {/* Scan to Rejoin Queue */}
-        <div className="p-3 border-b bg-green-50 border-green-200">
-          <label className="text-sm font-semibold text-green-900 flex items-center gap-1 mb-2">
-            <Activity className="w-4 h-4" />
-            Scan QR to Rejoin Queue
-          </label>
 
-          {/* QR Scanner */}
-          <QRScanner
-            onScan={(qrCode) => {
-              handleScanToRejoin(undefined, qrCode);
-            }}
-          />
-
-          {/* Name Search */}
-          <div className="mt-3 relative">
-            <label className="text-xs text-green-800 flex items-center gap-1 mb-1">
-              <UserPlus className="w-3 h-3" />
-              Or search by name:
-            </label>
-
-            {/* Search Results Dropdown - positioned above */}
-            {nameSearchQuery.length >= 2 && (
-              <div className="absolute z-20 w-full bottom-full mb-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                {nameSearchLoading ? (
-                  <div className="p-3 text-center text-gray-500 text-sm">Searching...</div>
-                ) : nameSearchResults.length > 0 ? (
-                  <div className="divide-y">
-                    {nameSearchResults.map((result) => (
-                      <button
-                        key={result.id}
-                        onClick={() => selectPlayerFromNameSearch(result)}
-                        disabled={scanningQr}
-                        className="w-full p-2 hover:bg-gray-50 flex items-center gap-2 text-left transition-colors disabled:opacity-50"
-                      >
-                        <ImageWithFallback
-                          src={result.photo_url}
-                          alt={result.name}
-                          name={result.name}
-                          className="w-8 h-8 rounded-full object-cover"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-sm truncate">{result.name}</p>
-                          <p className="text-xs text-gray-600">
-                            {getSkillLevelLabel(result.skill_level)}
-                          </p>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="p-3 text-center text-gray-500 text-sm">No players found</div>
-                )}
-              </div>
-            )}
-
-            <input
-              type="text"
-              placeholder="Type player name..."
-              value={nameSearchQuery}
-              onChange={(e) => handleNameSearch(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-              disabled={scanningQr}
+          {/* Scan to Rejoin Queue - Fixed at bottom */}
+          <div className="p-2 border-t bg-green-50 border-green-200 mt-auto">
+            {/* QR Scanner */}
+            <QRScanner
+              onScan={(qrCode) => {
+                handleScanToRejoin(undefined, qrCode);
+              }}
             />
+
+            {/* Name Search */}
+            <div className="mt-0.5 relative">
+            {/* Search Results Dropdown - positioned above */}
+              {nameSearchQuery.length >= 2 && (
+                <div className="absolute z-20 w-full bottom-full mb-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                  {nameSearchLoading ? (
+                    <div className="p-3 text-center text-gray-500 text-sm">Searching...</div>
+                  ) : nameSearchResults.length > 0 ? (
+                    <div className="divide-y">
+                      {nameSearchResults.map((result) => (
+                        <button
+                          key={result.id}
+                          onClick={() => selectPlayerFromNameSearch(result)}
+                          disabled={scanningQr}
+                          className="w-full p-2 hover:bg-gray-50 flex items-center gap-2 text-left transition-colors disabled:opacity-50"
+                        >
+                          <ImageWithFallback
+                            src={result.photo_url}
+                            alt={result.name}
+                            name={result.name}
+                            className="w-8 h-8 rounded-full object-cover"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-sm truncate">{result.name}</p>
+                            <p className="text-xs text-gray-600">
+                              {getSkillLevelLabel(result.skill_level)}
+                            </p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-3 text-center text-gray-500 text-sm">No players found</div>
+                  )}
+                </div>
+              )}
+
+              <input
+                type="text"
+                placeholder="Type player name..."
+                value={nameSearchQuery}
+                onChange={(e) => handleNameSearch(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                disabled={scanningQr}
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -2540,7 +2730,16 @@ export default function AdminDashboardRedesign() {
                 Time Warning
               </h2>
               <button
-                onClick={() => setTimeWarningModal({ isOpen: false, players: [] })}
+                onClick={() => {
+                  if (typeof window !== 'undefined') {
+                    const warningData = {
+                      timestamp: Date.now(),
+                      warnedPlayerIds: timeWarningModal.players.map(p => p.name),
+                    };
+                    localStorage.setItem('timeWarningData', JSON.stringify(warningData));
+                  }
+                  setTimeWarningModal({ isOpen: false, players: [], warnedPlayerIds: [] });
+                }}
                 className="text-gray-400 hover:text-gray-600 transition-colors"
               >
                 <span className="text-2xl">×</span>
@@ -2572,7 +2771,16 @@ export default function AdminDashboardRedesign() {
             
             <div className="flex justify-end">
               <Button
-                onClick={() => setTimeWarningModal({ isOpen: false, players: [] })}
+                onClick={() => {
+                  if (typeof window !== 'undefined') {
+                    const warningData = {
+                      timestamp: Date.now(),
+                      warnedPlayerIds: timeWarningModal.players.map(p => p.name),
+                    };
+                    localStorage.setItem('timeWarningData', JSON.stringify(warningData));
+                  }
+                  setTimeWarningModal({ isOpen: false, players: [], warnedPlayerIds: [] });
+                }}
                 className="w-full"
               >
                 Acknowledge

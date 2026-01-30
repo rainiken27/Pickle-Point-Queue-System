@@ -1,6 +1,6 @@
 import { Player } from './player';
 
-export type QueueStatus = 'waiting' | 'called' | 'playing';
+export type QueueStatus = 'waiting' | 'called' | 'playing' | 'waitlist';
 
 export interface QueueEntry {
   id: string;
