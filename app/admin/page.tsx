@@ -107,10 +107,25 @@ const getGroupColor = (group: { id: string; name: string } | null) => {
   };
 };
 
-// Queue Item Component (no longer sortable)
+// Sortable Queue Item Component
 function QueueItem({ entry, countdown, onRemove, onMoveToWaitlist }: any) {
   const [showOptions, setShowOptions] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: entry.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -131,7 +146,11 @@ function QueueItem({ entry, countdown, onRemove, onMoveToWaitlist }: any) {
 
   return (
     <div
-      className={`rounded-lg shadow-sm border p-2 ${
+      ref={setNodeRef}
+      style={style}
+      {...listeners}
+      {...attributes}
+      className={`rounded-lg shadow-sm border p-2 cursor-grab active:cursor-grabbing ${
         entry.group_id 
           ? `${getGroupColor((entry as any).group).bg} ${getGroupColor((entry as any).group).border}` 
           : 'bg-green-50 border-green-200'
@@ -2135,18 +2154,31 @@ export default function AdminDashboardRedesign() {
               .filter(e => queueSearchTerm === '' || e.player.name.toLowerCase().includes(queueSearchTerm.toLowerCase()))
               .sort((a, b) => a.position - b.position);
 
-            return filteredQueue.map((entry) => {
-              const countdown = getSessionCountdown(entry.player_id);
-              return (
-                <QueueItem
-                  key={entry.id}
-                  entry={entry}
-                  countdown={countdown}
-                  onRemove={handleRemoveFromQueue}
-                  onMoveToWaitlist={handleMoveToWaitlist}
-                />
-              );
-            });
+            return (
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={filteredQueue.map(entry => entry.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {filteredQueue.map((entry) => {
+                    const countdown = getSessionCountdown(entry.player_id);
+                    return (
+                      <QueueItem
+                        key={entry.id}
+                        entry={entry}
+                        countdown={countdown}
+                        onRemove={handleRemoveFromQueue}
+                        onMoveToWaitlist={handleMoveToWaitlist}
+                      />
+                    );
+                  })}
+                </SortableContext>
+              </DndContext>
+            );
           })()}
           {waitingQueue.length === 0 && (
             <div className="text-center py-8 text-gray-400">
