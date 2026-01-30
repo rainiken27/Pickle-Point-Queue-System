@@ -87,22 +87,37 @@ export async function POST(request: NextRequest) {
 
 async function recalculatePositions(supabase: any, movedEntryIds: string[] = []) {
   // Get all waiting entries (excluding newly moved ones for now)
-  let existingWaitingQuery = supabase
-    .from('queue')
-    .select('*')
-    .eq('status', 'waiting')
-    .order('position', { ascending: true });
-
-  // Only exclude moved entries if there are any
+  let existingWaitingEntries: any[] = [];
+  
   if (movedEntryIds.length > 0) {
-    existingWaitingQuery = existingWaitingQuery.not('id', 'in', movedEntryIds);
-  }
+    // Use a different approach to exclude moved entries
+    const { data: allWaitingEntries, error: fetchError } = await supabase
+      .from('queue')
+      .select('*')
+      .eq('status', 'waiting')
+      .order('position', { ascending: true });
 
-  const { data: existingWaitingEntries, error: fetchError } = await existingWaitingQuery;
+    if (fetchError) {
+      console.error('Error fetching all waiting entries:', fetchError);
+      return fetchError;
+    }
 
-  if (fetchError) {
-    console.error('Error fetching existing waiting entries:', fetchError);
-    return fetchError;
+    // Filter out moved entries manually
+    existingWaitingEntries = allWaitingEntries?.filter((entry: any) => !movedEntryIds.includes(entry.id)) || [];
+  } else {
+    // If no moved entries, get all waiting entries
+    const { data: allWaitingEntries, error: fetchError } = await supabase
+      .from('queue')
+      .select('*')
+      .eq('status', 'waiting')
+      .order('position', { ascending: true });
+
+    if (fetchError) {
+      console.error('Error fetching waiting entries:', fetchError);
+      return fetchError;
+    }
+
+    existingWaitingEntries = allWaitingEntries || [];
   }
 
   // Get the newly moved entries
@@ -138,7 +153,7 @@ async function recalculatePositions(supabase: any, movedEntryIds: string[] = [])
   let newPosition = 1;
 
   // Assign positions to existing waiting entries first (maintain their order)
-  for (const entry of existingWaitingEntries || []) {
+  for (const entry of existingWaitingEntries) {
     const { error: updateError } = await supabase
       .from('queue')
       .update({ position: newPosition })
