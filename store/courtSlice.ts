@@ -95,17 +95,30 @@ export const createCourtSlice: StateCreator<CourtSlice> = (set, get) => ({
   },
 
   subscribeToCourts: () => {
+    console.log('[Court] Setting up real-time subscription...');
+
     const subscription = supabase
       .channel('court-changes')
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'courts' },
-        () => {
+        (payload) => {
+          console.log('[Court] Real-time event received:', payload.eventType, payload);
           get().fetchCourts();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('[Court] Subscription status:', status);
+      });
+
+    // Fallback: Poll every 3 seconds if realtime doesn't work
+    const pollInterval = setInterval(() => {
+      console.log('[Court] Polling fallback...');
+      get().fetchCourts();
+    }, 3000);
 
     return () => {
+      console.log('[Court] Unsubscribing...');
+      clearInterval(pollInterval);
       subscription.unsubscribe();
     };
   },
