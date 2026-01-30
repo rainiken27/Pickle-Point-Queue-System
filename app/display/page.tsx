@@ -376,19 +376,21 @@ export default function TVDisplay() {
                         {court.court_timer_started_at && (() => {
                           const elapsed = Date.now() - new Date(court.court_timer_started_at).getTime();
                           const normalTime = 20 * 60 * 1000;
-                          return elapsed > normalTime ? 'Overtime' : 'In Progress';
+                          const status = elapsed > normalTime ? 'Overtime' : 'In Progress';
+                          return (
+                            <div className="flex items-center justify-center gap-2">
+                              <span>{status}</span>
+                              {courtTimerMs !== null && (
+                                <>
+                                  <span>•</span>
+                                  <Clock className="w-4 h-4 inline" />
+                                  <span>{formatCountdownMs(courtTimerMs)}</span>
+                                </>
+                              )}
+                            </div>
+                          );
                         })()}
                       </div>
-                      
-                      {/* Court Timer */}
-                      {courtTimerMs !== null && (
-                        <div className={`text-center mb-2 ${
-                          courtTimerMs < 5 * 60 * 1000 ? 'text-yellow-300 font-bold' : 'text-white/90'
-                        }`}>
-                          <Clock className="w-5 h-5 inline mr-1" />
-                          {formatCountdownMs(courtTimerMs)}
-                        </div>
-                      )}
 
                       {/* 4 Player Photos (horizontal line, centered) */}
                       {courtPlayers.length > 0 && (
@@ -399,7 +401,7 @@ export default function TVDisplay() {
                               name={entry.player.name}
                               photo_url={entry.player.photo_url}
                               display_photo={(entry as any).session?.display_photo}
-                              size="lg"
+                              size="md"
                               className="border-2 border-white/40"
                             />
                           ))}
@@ -507,7 +509,7 @@ export default function TVDisplay() {
                               name={entry.player.name}
                               photo_url={entry.player.photo_url}
                               display_photo={(entry as any).session?.display_photo}
-                              size="lg"
+                              size="md"
                               className="shrink-0 border-2 border-white/20"
                             />
 
