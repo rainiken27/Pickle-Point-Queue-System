@@ -524,8 +524,14 @@ export default function CashierPage() {
         const sessionData = await sessionResponse.json();
         if (sessionData.rejoining) {
           anyRejoining = true;
-          if (!minTimeRemaining || sessionData.time_remaining.ms < parseInt(minTimeRemaining)) {
-            minTimeRemaining = sessionData.time_remaining.formatted;
+          // Handle unlimited time players (time_remaining is null)
+          if (sessionData.time_remaining) {
+            if (!minTimeRemaining || sessionData.time_remaining.ms < parseInt(minTimeRemaining)) {
+              minTimeRemaining = sessionData.time_remaining.formatted;
+            }
+          } else {
+            // Unlimited time player
+            minTimeRemaining = 'Unlimited';
           }
         }
 
