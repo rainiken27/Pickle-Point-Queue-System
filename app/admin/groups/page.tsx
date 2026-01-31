@@ -15,6 +15,7 @@ export default function GroupsManagementPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<GroupWithMembers | null>(null);
   const [groupToDelete, setGroupToDelete] = useState<GroupWithMembers | null>(null);
   const [newGroupName, setNewGroupName] = useState('');
@@ -104,6 +105,27 @@ export default function GroupsManagementPage() {
       setSuccess(`Group "${newGroupName}" created successfully!`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create group');
+    }
+  };
+
+  // Delete all groups
+  const handleDeleteAllGroups = async () => {
+    try {
+      const response = await fetch('/api/groups', {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to delete all groups');
+      }
+
+      await fetchGroups();
+      setSelectedGroup(null);
+      setShowDeleteAllModal(false);
+      setSuccess(`All ${groups.length} groups deleted successfully!`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete all groups');
     }
   };
 
@@ -460,10 +482,21 @@ export default function GroupsManagementPage() {
               </h1>
               <p className="text-gray-600 mt-1">Create and manage friend groups for queue priority</p>
             </div>
-            <Button onClick={() => setShowCreateModal(true)}>
-              <Plus className="w-4 h-4 mr-2" />
-              Create Group
-            </Button>
+            <div className="flex items-center gap-3">
+              <Button onClick={() => setShowCreateModal(true)}>
+                <Plus className="w-4 h-4 mr-2" />
+                Create Group
+              </Button>
+              {groups.length > 0 && (
+                <Button
+                  variant="danger"
+                  onClick={() => setShowDeleteAllModal(true)}
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete All Groups
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -751,6 +784,49 @@ export default function GroupsManagementPage() {
                 </Button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete All Confirmation Modal */}
+      {showDeleteAllModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-2xl max-w-md w-full">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
+                  <AlertCircle className="w-6 h-6 text-red-600" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-gray-900">Delete All Groups?</h3>
+                  <p className="text-sm text-gray-600">This action cannot be undone</p>
+                </div>
+              </div>
+
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+                <p className="text-sm text-red-800">
+                  You're about to delete <strong>{groups.length} group{groups.length !== 1 ? 's' : ''}</strong> with a total of {groups.reduce((sum, g) => sum + g.member_count, 0)} members.
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <Button
+                  variant="secondary"
+                  onClick={() => setShowDeleteAllModal(false)}
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={handleDeleteAllGroups}
+                  className="flex-1"
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete All Groups
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       )}
