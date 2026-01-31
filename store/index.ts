@@ -34,8 +34,8 @@ export const useStore = create<StoreState>()(
 // Selectors for optimal re-rendering using useShallow
 export const useQueue = () => useStore(useShallow((state) => ({
   queueEntries: state.queueEntries,
-  loading: state.loading,
-  error: state.error,
+  loading: state.queueLoading,
+  error: state.queueError,
   fetchQueue: state.fetchQueue,
   addToQueue: state.addToQueue,
   removeFromQueue: state.removeFromQueue,
@@ -48,7 +48,7 @@ export const useQueue = () => useStore(useShallow((state) => ({
 
 export const useCourts = () => useStore(useShallow((state) => ({
   courts: state.courts,
-  loading: state.loading,
+  loading: state.courtLoading,
   fetchCourts: state.fetchCourts,
   updateCourtStatus: state.updateCourtStatus,
   assignSession: state.assignSession,

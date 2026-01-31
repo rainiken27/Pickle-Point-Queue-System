@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
-import { useRealtime } from '@/hooks/useRealtime';
 import { useQueue, useCourts } from '@/store';
 import { Clock, Users } from 'lucide-react';
 import { Court, QueueEntryWithPlayer } from '@/types';
@@ -214,7 +213,6 @@ export default function TVDisplay() {
   const { queueEntries, fetchQueue, subscribeToQueue } = useQueue();
   const { courts, fetchCourts, subscribeToCourts } = useCourts();
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [sessions, setSessions] = useState<Record<string, any>>({});
 
   useEffect(() => {
     fetchQueue();
@@ -235,56 +233,30 @@ export default function TVDisplay() {
   const waitingQueue = queueEntries.filter(e => e.status === 'waiting');
   const availableCourts = courts.filter(c => c.status === 'available').length;
 
-  // Fetch sessions for countdown
-  useEffect(() => {
-    const fetchSessions = async () => {
-      try {
-        const playerIds = waitingQueue.map(e => e.player_id);
-        if (playerIds.length === 0) {
-          setSessions({});
-          return;
-        }
-
-        const { supabase } = await import('@/lib/supabase/client');
-        const { data } = await supabase
-          .from('sessions')
-          .select(`
-            *,
-            players!inner (
-              unlimited_time
-            )
-          `)
-          .eq('status', 'active')
-          .in('player_id', playerIds);
-
-        if (data) {
-          const sessionMap: Record<string, any> = {};
-          data.forEach(session => {
-            sessionMap[session.player_id] = session;
-          });
-          setSessions(sessionMap);
-        }
-      } catch (error) {
-        console.error('Error fetching sessions:', error);
-      }
-    };
-
-    fetchSessions();
-  }, [queueEntries]);
-
   const getSessionCountdown = (playerId: string) => {
-    const session = sessions[playerId];
-    if (!session) return null;
+    const entry = queueEntries.find(e => e.player_id === playerId);
+    if (!entry) return null;
 
-    // Check if player has unlimited time
-    if (session.players?.unlimited_time) {
+    // Check if player has unlimited time (from player data already in store)
+    if ((entry.player as any)?.unlimited_time) {
       return '∞';
     }
 
-    const startTime = new Date(session.start_time).getTime();
-    const fiveHoursInMs = 5 * 60 * 60 * 1000;
-    const elapsed = currentTime.getTime() - startTime;
-    const remaining = fiveHoursInMs - elapsed;
+    // Use session data from store (fetched alongside queue data)
+    const session = (entry as any).session;
+    if (!session?.start_time) return null;
+
+    let remaining: number;
+
+    // If session has an end_time (extended session), use that
+    if (session.end_time) {
+      remaining = new Date(session.end_time).getTime() - currentTime.getTime();
+    } else {
+      // Default calculation: 5 hours from start time
+      const fiveHoursInMs = 5 * 60 * 60 * 1000;
+      const elapsed = currentTime.getTime() - new Date(session.start_time).getTime();
+      remaining = fiveHoursInMs - elapsed;
+    }
 
     if (remaining <= 0) return '0:00:00';
 
@@ -316,25 +288,28 @@ export default function TVDisplay() {
       {/* Header */}
       <div className="grid grid-cols-3 items-center mb-4 shrink-0">
         <div className="justify-self-start">
-          <img src="/logo.png" alt="PicklePoint Queue" className="h-28 w-auto" />
+          <img src="/logo.png" alt="PicklePoint Queue" className="h-25 w-auto" />
         </div>
-        <div className="text-6xl font-bold justify-self-center" suppressHydrationWarning>
+        <div className="text-5xl font-bold justify-self-center" suppressHydrationWarning>
           {currentTime.toLocaleTimeString()}
         </div>
-        <div className="flex items-center gap-4 justify-self-end">
+        <div className="flex flex-col items-end justify-self-end">
           <div className="text-2xl" suppressHydrationWarning>
             {currentTime.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+          </div>
+          <div className="text-2xl font-medium flex items-center gap-2">
+            <Users className="w-6 h-6" />
+            Queue ({waitingQueue.length})
           </div>
         </div>
       </div>
 
 
-      {/* Main Content - Courts and Queue */}
-      <div className="grid gap-4 flex-1 min-h-0" style={{ gridTemplateColumns: '55% 45%' }}>
-        {/* Courts - Takes 55% width */}
-        <div className="bg-black/25 backdrop-blur-md p-4 rounded-lg border border-white/10">
-          <h3 className="text-2xl font-semibold text-white/90 mb-4">Courts</h3>
-          <div className="grid grid-cols-2 gap-3">
+      {/* Main Content - Courts Strip and Queue */}
+      <div className="flex flex-col gap-2 flex-1 min-h-0">
+        {/* Courts - Horizontal Strip */}
+        <div className="bg-black/25 backdrop-blur-md p-1 rounded-lg border border-white/10 h-26 shrink-0">
+          <div className="flex gap-1 h-full">
             {courts.slice(0, 6).map(court => {
               const courtPlayers = getCourtPlayers(court.id);
               const courtTimerMs = court.court_timer_started_at
@@ -344,70 +319,75 @@ export default function TVDisplay() {
               return (
                 <div
                   key={court.id}
-                  className={`p-4 rounded-lg ${
+                  className={`p-2 rounded-lg relative overflow-hidden flex-1 ${
                     court.status === 'available'
                       ? 'bg-amber-500'
                       : court.status === 'reserved'
                       ? 'bg-blue-600'
-                      : court.status === 'occupied' && court.court_timer_started_at
-                        ? (() => {
-                            const elapsed = Date.now() - new Date(court.court_timer_started_at).getTime();
-                            const normalTime = 20 * 60 * 1000; // 20 minutes
-                            return elapsed > normalTime ? 'bg-red-600' : 'bg-green-600';
-                          })()
-                        : 'bg-red-600'
+                      : courtTimerMs !== null && courtTimerMs <= 0
+                      ? 'bg-red-600'
+                      : 'bg-green-500'
                   }`}
                 >
-                  <div className="text-3xl font-bold text-white text-center mb-2">
-                    Court {court.court_number}
-                  </div>
+                  {court.status === 'occupied' ? (
+                    <div className={`text-lg font-bold text-white text-center mb-1 ${
+                      courtTimerMs !== null && courtTimerMs < 5 * 60 * 1000 ? 'text-yellow-300' : ''
+                    }`}>
+                      Court {court.court_number}
+                      {courtTimerMs !== null && (
+                        <>
+                          {' '}•{' '}
+                          <span className="font-mono">
+                            {formatCountdownMs(courtTimerMs)}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-base font-bold text-white text-center mb-1">
+                      Court {court.court_number}
+                    </div>
+                  )}
 
                   {court.status === 'available' && (
-                    <div className="text-lg text-white/90 text-center">Open</div>
+                    <div className="text-sm text-white/90 text-center">Open</div>
                   )}
 
                   {court.status === 'reserved' && (
-                    <div className="text-lg text-white/90 text-center">{(court as any).reserved_note || 'Reserved'}</div>
+                    <div className="text-sm text-white/90 text-center">
+                      {(() => {
+                        const note = (court as any).reserved_note && (court as any).reserved_note.trim();
+                        const reservedBy = (court as any).reserved_by && (court as any).reserved_by.trim();
+
+                        if (note && reservedBy) {
+                          return `${note} (${reservedBy})`;
+                        } else if (note) {
+                          return note;
+                        } else if (reservedBy) {
+                          return `Reserved (${reservedBy})`;
+                        } else {
+                          return 'Reserved';
+                        }
+                      })()}
+                    </div>
                   )}
 
                   {court.status === 'occupied' && (
                     <>
-                      <div className="text-lg text-white/90 text-center">
-                        {court.court_timer_started_at && (() => {
-                          const elapsed = Date.now() - new Date(court.court_timer_started_at).getTime();
-                          const normalTime = 20 * 60 * 1000;
-                          const status = elapsed > normalTime ? 'Overtime' : 'In Progress';
-                          return (
-                            <div className="flex items-center justify-center gap-2">
-                              <span>{status}</span>
-                              {courtTimerMs !== null && (
-                                <>
-                                  <span>•</span>
-                                  <Clock className="w-4 h-4 inline" />
-                                  <span>{formatCountdownMs(courtTimerMs)}</span>
-                                </>
-                              )}
-                            </div>
-                          );
-                        })()}
-                      </div>
-
-                      {/* 4 Player Photos (horizontal line, centered) */}
-                      {courtPlayers.length > 0 && (
-                        <div className="flex justify-center items-center gap-2 mt-2">
-                          {courtPlayers.map((entry) => (
+                      <div className="flex justify-center items-center gap-0.5 mt-1">
+                        {courtPlayers.map((entry) => (
                             <PlayerAvatar
                               key={entry.id}
                               name={entry.player.name}
                               photo_url={entry.player.photo_url}
                               display_photo={(entry as any).session?.display_photo}
                               size="md"
-                              className="border-2 border-white/40"
+                              className="border-2 border-white/40 flex-shrink-0"
                             />
-                          ))}
-                        </div>
-                      )}
+                        ))}
+                      </div>
                     </>
+
                   )}
                 </div>
               );
@@ -415,19 +395,15 @@ export default function TVDisplay() {
           </div>
         </div>
 
-        {/* Queue - Takes 45% width */}
-        <div className="bg-black/25 backdrop-blur-md p-4 rounded-lg border border-white/10 flex flex-col min-h-0">
-          <h3 className="text-3xl font-semibold text-white mb-4 flex items-center gap-2 shrink-0">
-            <Users className="w-10 h-10" />
-            Queue ({waitingQueue.length})
-          </h3>
+        {/* Queue - Full Height Below */}
+        <div className="bg-black/25 backdrop-blur-md p-2 rounded-lg border border-white/10 flex flex-col min-h-0 flex-1">
 
           {waitingQueue.length === 0 ? (
             <div className="text-center py-8 flex-1 flex items-center justify-center">
               <p className="text-white/50 text-2xl font-medium">No players waiting</p>
             </div>
           ) : (
-            <div className="space-y-4 overflow-y-auto flex-1 pr-2">
+            <div className="overflow-y-auto flex-1 pr-2 grid grid-cols-3 gap-2 content-start">
               {(() => {
                 const displayUnits = createDisplayUnits(waitingQueue, availableCourts);
                 let positionCounter = 1;
@@ -435,61 +411,29 @@ export default function TVDisplay() {
                 return displayUnits.map((unit, unitIndex) => (
                   <div
                     key={`unit-${unitIndex}`}
-                    className={`p-4 rounded-lg transition-all border-2 ${
+                    className={`p-2 rounded-lg transition-all border-2 ${
                       unit.isComplete
-                        ? 'bg-amber-500/20 border-amber-400/60 shadow-lg shadow-amber-500/20' // Gold outline for complete groups
+                        ? 'bg-white/5 backdrop-blur-sm border-amber-400/80 shadow-md shadow-amber-500/20' // Gold outline for complete groups
                         : unitIndex === 0
                         ? 'bg-yellow-500/30 border-yellow-400/40'
-                        : 'bg-white/5 border-white/10'
+                        : 'bg-white/5 border-white/10 backdrop-blur-sm'
                     }`}
                   >
                     {/* Unit Header */}
-                    {unit.type === 'group' && (
-                      <div className="text-center mb-2">
-                        <span className={`text-sm font-bold px-2 py-1 rounded ${
-                          unit.isComplete 
-                            ? 'bg-amber-500 text-white' 
-                            : 'bg-blue-500 text-white'
-                        }`}>
-                          {unit.groupName} {unit.isComplete ? '(Ready!)' : `(${unit.players.length}/4)`}
-                        </span>
-                      </div>
-                    )}
                     
-                    {unit.type === 'solo_stack' && (
+                    {unit.type === 'solo_stack' && unit.groupName && (
                       <div className="text-center mb-2">
                         <span className={`text-sm font-bold px-2 py-1 rounded ${
                           unit.isComplete
                             ? 'bg-amber-500 text-white'
-                            : unit.groupName
-                            ? 'bg-blue-500 text-white'
-                            : 'bg-gray-600 text-white'
+                            : 'bg-blue-500 text-white'
                         }`}>
-                          {unit.groupName ? (
-                            // Mixed unit with group members
-                            <>
-                              {unit.groupName}
-                              {(() => {
-                                // Count solo players (those not in the group)
-                                const soloCount = unit.players.filter(p => !p.group_id).length;
-                                if (soloCount > 0) {
-                                  return ` + ${soloCount} Solo`;
-                                }
-                                return '';
-                              })()}
-                              {' '}
-                              {unit.isComplete ? '(Ready!)' : `(${unit.players.length}/4)`}
-                            </>
-                          ) : (
-                            // Pure solo stack
-                            unit.players.length === 1
-                              ? 'Needs 3 More Players'
-                              : unit.players.length === 2
-                              ? 'Needs 2 More Players'
-                              : unit.players.length === 3
-                              ? 'Needs 1 More Player'
-                              : 'Solo Stack (Ready!)'
-                          )}
+                          {unit.groupName}
+                          {(() => {
+                            const soloCount = unit.players.filter(p => !p.group_id).length;
+                            return soloCount > 0 ? ` + ${soloCount} Solo` : '';
+                          })()}
+                          {unit.isComplete ? '' : ` (${unit.players.length}/4)`}
                         </span>
                       </div>
                     )}
@@ -499,10 +443,11 @@ export default function TVDisplay() {
                       {unit.players.map((entry) => {
                         const sessionCountdown = getSessionCountdown(entry.player_id);
                         const currentPosition = positionCounter++;
+                        const groupLabel = unit.groupName || 'Solo';
                         
                         return (
                           <div key={entry.id} className="flex items-center gap-2">
-                            <span className="font-bold text-white text-xl w-10">#{currentPosition}</span>
+                            <span className="font-bold text-white text-xl w-8 text-right">{currentPosition}.</span>
 
                             {/* Player Photo */}
                             <PlayerAvatar
@@ -510,7 +455,7 @@ export default function TVDisplay() {
                               photo_url={entry.player.photo_url}
                               display_photo={(entry as any).session?.display_photo}
                               size="md"
-                              className="shrink-0 border-2 border-white/20"
+                              className="shrink-0 border-2 border-white"
                             />
 
                             <div className="flex-1 min-w-0">
@@ -518,9 +463,8 @@ export default function TVDisplay() {
                               <div className="font-bold text-white truncate text-xl">
                                 {entry.player.name}
                               </div>
-                              {/* Skill Level */}
-                              <div className="text-base text-white/80 font-medium">
-                                {getSkillLevelLabel(entry.player.skill_level)}
+                              <div className="text-base text-white/80 font-medium truncate">
+                                {groupLabel} • {getSkillLevelLabel(entry.player.skill_level)}
                               </div>
                             </div>
 
@@ -541,16 +485,16 @@ export default function TVDisplay() {
                           {Array.from({ length: unit.placeholderCount }).map((_, i) => {
                             const currentPosition = positionCounter++;
                             return (
-                              <div key={`placeholder-${i}`} className="flex items-center gap-2 opacity-50">
-                                <span className="font-bold text-white text-xl w-10">#{currentPosition}</span>
-                                
+                              <div key={`placeholder-${i}`} className="flex items-center gap-2 opacity-40">
+                                <span className="font-bold text-white text-xl w-8 text-right">{currentPosition}.</span>
+
                                 {/* Empty placeholder circle */}
-                                <div className="w-16 h-16 rounded-full border-2 border-dashed border-white/40 shrink-0 flex items-center justify-center">
+                                <div className="w-12 h-12 rounded-full border-2 border-dashed border-white/40 shrink-0 flex items-center justify-center">
                                   <span className="text-white/60 text-sm">?</span>
                                 </div>
-                                
+
                                 <div className="flex-1 min-w-0">
-                                  <div className="text-white/60 text-xl italic">
+                                  <div className="font-bold text-white/60 text-xl italic">
                                     Waiting for player...
                                   </div>
                                 </div>

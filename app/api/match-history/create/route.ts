@@ -3,29 +3,38 @@ import { supabaseServer } from '@/lib/supabase/server';
 import { z } from 'zod';
 
 const CreateMatchHistorySchema = z.object({
-  session_id: z.string().uuid(),
-  player_ids: z.array(z.string().uuid()).length(4),
+  court_id: z.string().uuid(),
+  player_ids: z.array(z.string().uuid()).min(2).max(4),
 });
 
 /**
- * Create match history records for all 4 players in a match
+ * Create a match history record when a match starts
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { session_id, player_ids } = CreateMatchHistorySchema.parse(body);
+    const { court_id, player_ids } = CreateMatchHistorySchema.parse(body);
 
-    // Create a match history record for each player
-    const matchHistoryRecords = player_ids.map(player_id => ({
-      session_id,
-      player_id,
-      opponent_ids: player_ids.filter(id => id !== player_id), // All other players
-      match_date: new Date().toISOString(),
-    }));
+    // Only record doubles matches — the table schema requires 4 unique players
+    // (unique_team_members constraint), so singles matches are skipped
+    if (player_ids.length < 4) {
+      return NextResponse.json(
+        { message: 'Singles match history not recorded (table requires 4 players)' },
+        { status: 200 }
+      );
+    }
+
+    const record = {
+      court_id,
+      team_a_player_1_id: player_ids[0],
+      team_a_player_2_id: player_ids[1],
+      team_b_player_1_id: player_ids[2],
+      team_b_player_2_id: player_ids[3],
+    };
 
     const { data, error } = await supabaseServer
       .from('match_history')
-      .insert(matchHistoryRecords)
+      .insert(record)
       .select();
 
     if (error) {

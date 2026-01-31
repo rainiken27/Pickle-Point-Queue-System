@@ -4,8 +4,8 @@ import { supabase } from '@/lib/supabase/client';
 
 export interface QueueSlice {
   queueEntries: QueueEntryWithPlayer[];
-  loading: boolean;
-  error: string | null;
+  queueLoading: boolean;
+  queueError: string | null;
 
   // Actions
   fetchQueue: () => Promise<void>;
@@ -23,11 +23,11 @@ export interface QueueSlice {
 
 export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
   queueEntries: [],
-  loading: false,
-  error: null,
+  queueLoading: false,
+  queueError: null,
 
   fetchQueue: async () => {
-    set({ loading: true, error: null });
+    set({ queueLoading: true, queueError: null });
     try {
       // First, fetch queue entries with player and group data
       const { data: queueData, error: queueError } = await supabase
@@ -47,7 +47,7 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
         const playerIds = queueData.map(q => q.player_id);
         const { data: sessionsData } = await supabase
           .from('sessions')
-          .select('player_id, display_photo')
+          .select('player_id, display_photo, start_time, end_time')
           .in('player_id', playerIds)
           .eq('status', 'active');
 
@@ -72,12 +72,12 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
           display_photo: (e as any).session?.display_photo
         })));
 
-        set({ queueEntries: enrichedData, loading: false });
+        set({ queueEntries: enrichedData, queueLoading: false });
       } else {
-        set({ queueEntries: [], loading: false });
+        set({ queueEntries: [], queueLoading: false });
       }
     } catch (error) {
-      set({ error: (error as Error).message, loading: false });
+      set({ queueError: (error as Error).message, queueLoading: false });
     }
   },
 
@@ -131,7 +131,7 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
       if (error) throw error;
       await get().fetchQueue();
     } catch (error) {
-      set({ error: (error as Error).message });
+      set({ queueError: (error as Error).message });
       throw error;
     }
   },
@@ -146,7 +146,7 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
       if (error) throw error;
       await get().fetchQueue();
     } catch (error) {
-      set({ error: (error as Error).message });
+      set({ queueError: (error as Error).message });
       throw error;
     }
   },
@@ -161,7 +161,7 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
       if (error) throw error;
       await get().fetchQueue();
     } catch (error) {
-      set({ error: (error as Error).message });
+      set({ queueError: (error as Error).message });
       throw error;
     }
   },
@@ -179,7 +179,7 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
       }
       await get().fetchQueue();
     } catch (error) {
-      set({ error: (error as Error).message });
+      set({ queueError: (error as Error).message });
       throw error;
     }
   },
@@ -187,29 +187,67 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
   subscribeToQueue: () => {
     console.log('[Queue] Setting up real-time subscription...');
 
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let realtimeConnected = false;
+
+    const debouncedFetch = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        get().fetchQueue();
+      }, 500);
+    };
+
+    const startPolling = () => {
+      if (pollInterval) return;
+      console.log('[Queue] Realtime failed, starting polling fallback...');
+      pollInterval = setInterval(() => {
+        get().fetchQueue();
+      }, 15000);
+    };
+
+    const stopPolling = () => {
+      if (pollInterval) {
+        console.log('[Queue] Realtime connected, stopping polling fallback.');
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+    };
+
     const subscription = supabase
       .channel('queue-changes')
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'queue' },
         (payload) => {
-          console.log('[Queue] Real-time event received:', payload.eventType, payload);
-          get().fetchQueue();
+          console.log('[Queue] Real-time event received:', payload.eventType);
+          debouncedFetch();
         }
       )
       .subscribe((status) => {
         console.log('[Queue] Subscription status:', status);
+        if (status === 'SUBSCRIBED') {
+          realtimeConnected = true;
+          stopPolling();
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          realtimeConnected = false;
+          startPolling();
+        }
       });
 
-    // Fallback: Poll every 3 seconds if realtime doesn't work
-    const pollInterval = setInterval(() => {
-      console.log('[Queue] Polling fallback...');
-      get().fetchQueue();
-    }, 3000);
+    // If realtime hasn't connected within 5 seconds, start polling as safety net
+    const connectTimeout = setTimeout(() => {
+      if (!realtimeConnected) {
+        console.log('[Queue] Realtime not connected after 5s, starting polling fallback...');
+        startPolling();
+      }
+    }, 5000);
 
     return () => {
       console.log('[Queue] Unsubscribing...');
-      clearInterval(pollInterval);
-      subscription.unsubscribe();
+      clearTimeout(connectTimeout);
+      if (pollInterval) clearInterval(pollInterval);
+      if (debounceTimer) clearTimeout(debounceTimer);
+      supabase.removeChannel(subscription);
     };
   },
 
@@ -245,7 +283,7 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
       await get().fetchQueue();
     } catch (error) {
       console.error('[Queue Store] Error in moveToWaitlist:', error);
-      set({ error: (error as Error).message });
+      set({ queueError: (error as Error).message });
       throw error;
     }
   },
@@ -281,7 +319,7 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
       await get().fetchQueue();
     } catch (error) {
       console.error('[Queue Store] Error in moveToQueue:', error);
-      set({ error: (error as Error).message });
+      set({ queueError: (error as Error).message });
       throw error;
     }
   },
@@ -304,7 +342,7 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
       await get().fetchQueue();
     } catch (error) {
       console.error('[Queue Store] Error in moveGroupToQueue:', error);
-      set({ error: (error as Error).message });
+      set({ queueError: (error as Error).message });
       throw error;
     }
   },

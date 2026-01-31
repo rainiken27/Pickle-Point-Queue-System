@@ -278,7 +278,6 @@ export default function AdminDashboardRedesign() {
     playerName: '',
   });
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [sessions, setSessions] = useState<Record<string, any>>({});
   const [scanQrInput, setScanQrInput] = useState('');
   const [scanningQr, setScanningQr] = useState(false);
   const [nameSearchQuery, setNameSearchQuery] = useState('');
@@ -814,7 +813,7 @@ export default function AdminDashboardRedesign() {
     };
 
     checkExpiredSessions();
-    const expirationInterval = setInterval(checkExpiredSessions, 30 * 1000); // Check every 30 seconds
+    const expirationInterval = setInterval(checkExpiredSessions, 120 * 1000); // Check every 2 minutes
 
     return () => {
       clearInterval(updateInterval);
@@ -825,61 +824,21 @@ export default function AdminDashboardRedesign() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Remove courts dependency to prevent infinite loop
 
-  // Fetch sessions for countdown
-  useEffect(() => {
-    const fetchSessions = async () => {
-      try {
-        const waiting = queueEntries.filter(e => e.status === 'waiting');
-        const playerIds = waiting.map(e => e.player_id);
-        if (playerIds.length === 0) return;
-
-        // Fetch sessions with player unlimited_time flag
-        const { data } = await (await import('@/lib/supabase/client')).supabase
-          .from('sessions')
-          .select(`
-            *,
-            players!inner (
-              unlimited_time
-            )
-          `)
-          .eq('status', 'active')
-          .in('player_id', playerIds);
-
-        console.log('[Session Debug] Raw session data from DB:', data);
-
-        if (data) {
-          const sessionMap: Record<string, any> = {};
-          data.forEach(session => {
-            sessionMap[session.player_id] = session;
-          });
-          setSessions(sessionMap);
-        }
-      } catch (error) {
-        console.error('Error fetching sessions:', error);
-      }
-    };
-
-    fetchSessions();
-  }, [queueEntries]);
-
   const getSessionCountdown = (playerId: string) => {
-    const session = sessions[playerId];
-    if (!session) {
-      // Check if this player is in the queue and has unlimited_time
-      const queueEntry = queueEntries.find(e => e.player_id === playerId);
-      if (queueEntry && (queueEntry.player as any)?.unlimited_time) {
-        return '∞';
-      }
-      return null;
-    }
+    const entry = queueEntries.find(e => e.player_id === playerId);
+    if (!entry) return null;
 
-    // Check if player has unlimited time
-    if (session.players?.unlimited_time) {
+    // Check if player has unlimited time (from player data already in store)
+    if ((entry.player as any)?.unlimited_time) {
       return '∞';
     }
 
+    // Use session data from store (fetched alongside queue data)
+    const session = (entry as any).session;
+    if (!session?.start_time) return null;
+
     let remaining: number;
-    
+
     // If session has an end_time (extended session), use that
     if (session.end_time) {
       remaining = new Date(session.end_time).getTime() - Date.now();
@@ -1097,7 +1056,7 @@ export default function AdminDashboardRedesign() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            session_id: existingSession.id,
+            court_id: courtId,
             player_ids: match.players.map(p => p.id),
           }),
         });

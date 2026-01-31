@@ -4,8 +4,8 @@ import { supabase } from '@/lib/supabase/client';
 
 export interface CourtSlice {
   courts: CourtWithSession[];
-  loading: boolean;
-  error: string | null;
+  courtLoading: boolean;
+  courtError: string | null;
 
   // Actions
   fetchCourts: () => Promise<void>;
@@ -17,11 +17,11 @@ export interface CourtSlice {
 
 export const createCourtSlice: StateCreator<CourtSlice> = (set, get) => ({
   courts: [],
-  loading: false,
-  error: null,
+  courtLoading: false,
+  courtError: null,
 
   fetchCourts: async () => {
-    set({ loading: true, error: null });
+    set({ courtLoading: true, courtError: null });
     try {
       const { data, error } = await supabase
         .from('courts')
@@ -29,9 +29,9 @@ export const createCourtSlice: StateCreator<CourtSlice> = (set, get) => ({
         .order('court_number', { ascending: true });
 
       if (error) throw error;
-      set({ courts: data || [], loading: false });
+      set({ courts: data || [], courtLoading: false });
     } catch (error) {
-      set({ error: (error as Error).message, loading: false });
+      set({ courtError: (error as Error).message, courtLoading: false });
     }
   },
 
@@ -45,7 +45,7 @@ export const createCourtSlice: StateCreator<CourtSlice> = (set, get) => ({
       if (error) throw error;
       await get().fetchCourts();
     } catch (error) {
-      set({ error: (error as Error).message });
+      set({ courtError: (error as Error).message });
       throw error;
     }
   },
@@ -70,7 +70,7 @@ export const createCourtSlice: StateCreator<CourtSlice> = (set, get) => ({
       if (error) throw error;
       await get().fetchCourts();
     } catch (error) {
-      set({ error: (error as Error).message });
+      set({ courtError: (error as Error).message });
       throw error;
     }
   },
@@ -89,7 +89,7 @@ export const createCourtSlice: StateCreator<CourtSlice> = (set, get) => ({
       if (error) throw error;
       await get().fetchCourts();
     } catch (error) {
-      set({ error: (error as Error).message });
+      set({ courtError: (error as Error).message });
       throw error;
     }
   },
@@ -97,29 +97,67 @@ export const createCourtSlice: StateCreator<CourtSlice> = (set, get) => ({
   subscribeToCourts: () => {
     console.log('[Court] Setting up real-time subscription...');
 
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let realtimeConnected = false;
+
+    const debouncedFetch = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        get().fetchCourts();
+      }, 500);
+    };
+
+    const startPolling = () => {
+      if (pollInterval) return;
+      console.log('[Court] Realtime failed, starting polling fallback...');
+      pollInterval = setInterval(() => {
+        get().fetchCourts();
+      }, 15000);
+    };
+
+    const stopPolling = () => {
+      if (pollInterval) {
+        console.log('[Court] Realtime connected, stopping polling fallback.');
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+    };
+
     const subscription = supabase
       .channel('court-changes')
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'courts' },
         (payload) => {
-          console.log('[Court] Real-time event received:', payload.eventType, payload);
-          get().fetchCourts();
+          console.log('[Court] Real-time event received:', payload.eventType);
+          debouncedFetch();
         }
       )
       .subscribe((status) => {
         console.log('[Court] Subscription status:', status);
+        if (status === 'SUBSCRIBED') {
+          realtimeConnected = true;
+          stopPolling();
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          realtimeConnected = false;
+          startPolling();
+        }
       });
 
-    // Fallback: Poll every 3 seconds if realtime doesn't work
-    const pollInterval = setInterval(() => {
-      console.log('[Court] Polling fallback...');
-      get().fetchCourts();
-    }, 3000);
+    // If realtime hasn't connected within 5 seconds, start polling as safety net
+    const connectTimeout = setTimeout(() => {
+      if (!realtimeConnected) {
+        console.log('[Court] Realtime not connected after 5s, starting polling fallback...');
+        startPolling();
+      }
+    }, 5000);
 
     return () => {
       console.log('[Court] Unsubscribing...');
-      clearInterval(pollInterval);
-      subscription.unsubscribe();
+      clearTimeout(connectTimeout);
+      if (pollInterval) clearInterval(pollInterval);
+      if (debounceTimer) clearTimeout(debounceTimer);
+      supabase.removeChannel(subscription);
     };
   },
 });
